@@ -237,7 +237,7 @@
       rows.push('<div class="sum-row"><span>GST</span><b>' + money(t.gst) + '</b></div>');
       rows.push('<div class="sum-row total"><span>Total incl. GST</span><b>' + money(t.total) + '</b></div>');
       return '<div class="card" id="sum"><div class="card-h"><h2>Summary</h2><span class="muted small">Rate card ' + esc(rates.version) + '</span></div><div class="card-b">' + rows.join('') +
-        '<div class="internal"><div><small>Cost</small><b>' + money(t.costs.total) + '</b></div><div><small>Gross profit</small><b>' + money(t.profit) + '</b></div><div><small>Margin</small><b>' + App.pct(t.margin) + '</b></div><div><small>Time</small><b>' + t.personHours + ' h</b><small>' + t.siteHours + ' h on site</small></div></div>' +
+        '<div class="internal"><div><small>Cost</small><b>' + money(t.costs.total) + '</b></div><div><small>Gross profit</small><b>' + money(t.profit) + '</b></div><div><small>Margin</small><b>' + App.pct(t.margin) + '</b></div><div><small>Est. man-hours</small><b>' + t.personHours + ' h</b><small>≈ ' + t.siteHours + ' h with ' + t.crew + ' men</small></div></div>' +
         '<p class="muted small" style="margin:8px 2px 0">Cost, profit and margin are for you only; the customer document shows prices.</p></div></div>';
     }
     function notesCard() {
@@ -396,7 +396,7 @@
     document.getElementById('top').addEventListener('click', function (e) {
       var p = e.target.closest('.pill'); if (!p || !S.id) return;
       App.menu(p, '<div class="g">Mark quote as</div>' + STATUSES.map(function (s) { return '<button data-v="' + s + '">' + App.pill(s) + '</button>'; }).join('') +
-        '<div class="g">Job</div><button data-v="__job">' + icon('calendar') + '<span><b>' + (S.job ? 'Open in schedule' : 'Schedule the job') + '</b><small>' + (S.job ? App.date(S.job.start) + ' · ' + esc(S.job.crew) : 'Book a date and crew') + '</small></span></button>', function (v) {
+        '<div class="g">Job</div><button data-v="__job">' + icon('calendar') + '<span><b>' + (S.job ? 'Open in schedule' : 'Schedule the job') + '</b><small>' + (S.job ? App.date(S.job.start) + ' · ' + esc(S.job.crew) : 'Drag it onto the calendar') + '</small></span></button>', function (v) {
         if (v === '__job') { App.go(S.job ? '#/schedule?date=' + S.job.start.slice(0, 10) : '#/schedule?quote=' + S.id); return; }
         App.put('quotes/' + S.id + '/status', { status: v }).then(function () { S.status = v; topKey = null; renderTop(); App.toast('Marked ' + v + '.'); }).catch(function (x) { App.toast(x.message, 'err'); });
       });

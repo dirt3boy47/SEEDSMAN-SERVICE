@@ -22,7 +22,12 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    hours (for staff only).
 5. **Save** (each save is a revision), set the status from the pill next to the quote number, open the **Document**
    (customer-facing quotation with site map) and **Save PDF / Print** or **Email**.
-6. **Schedule** accepted quotes onto the week with a crew; jobs move through Scheduled → In progress → Completed.
+6. **Schedule** — accepted quotes wait in the **To schedule** tray with their estimated man-hours. Drag one onto a day
+   and time (mouse, finger on the grip, or Pencil); job time = man-hours ÷ men. A crew's jobs on the same day are spaced
+   by the driving time between the properties (straight line × road factor at an average speed, plus parking time —
+   set under the ⚙ on the Schedule page), shown as orange drive blocks. Jobs placed straight after another stay attached
+   and move with it. Tap a job to add or remove men (its length and the jobs after it update), change man-hours, crew,
+   time, status or notes, get directions, or unschedule it. **Route** on a day shows the stops on a map in order.
 
 Other pages: **Overview** (open quotes, won this month, win rate, jobs this week, follow-ups), **Customers**,
 **Properties** (job locations with their site drawings, quotes and jobs), **Map** (the full-screen GIS workspace: every job
@@ -49,7 +54,7 @@ All figures are editable on **Services & pricing**; saving makes a new rate card
 
 Cloudflare D1 database `seedsmans`: `customers`, `properties` (+ `lat`/`lng`, migration 0004), `site_drawings`
 (migration 0005: lines, areas and points per property, with measurements), `quotes` (+ append-only `quote_revisions`),
-`jobs`, `rate_library`, `business_settings`, `user`/`account`/`session`, `request_limits`, `audit_log`.
+`jobs` (+ `men`, `man_hours`, `travel_minutes`, `sequence`, migration 0006), `rate_library`, `business_settings`, `user`/`account`/`session`, `request_limits`, `audit_log`.
 `schema/existing.sql` is a copy of the tables that were there before this app. Migrations are applied by hand
 (`wrangler d1 execute seedsmans --remote --file migrations/000N_….sql`).
 

@@ -131,6 +131,7 @@ async function api(request, env, url) {
     case 'drawings': return drawingsApi(env, me, m, parts, body);
     case 'quotes': return quotesApi(env, me, m, parts, url, body);
     case 'jobs': return jobsApi(env, me, m, parts, url, body);
+    case 'schedule': return scheduleApi(env, me, m, parts, url, body);
   }
   fail(404, 'Not found.');
 }
@@ -199,7 +200,9 @@ const QUOTE_LIST = "SELECT q.id, q.number, q.status, q.revision, q.created_at, q
   "c.name AS customer, p.address, p.suburb, (SELECT j.id FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') AS job_id, " +
   "coalesce((SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l), 'Hedge trimming') AS services " +
   "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id";
-const JOB_LIST = "SELECT j.*, c.name AS customer, p.address, p.suburb, p.lat, p.lng, q.number AS quote_number, json_extract(q.calculation, '$.total') AS total " +
+const JOB_LIST = "SELECT j.*, c.name AS customer, c.phone, p.address, p.suburb, p.lat, p.lng, q.number AS quote_number, json_extract(q.calculation, '$.total') AS total, " +
+  "coalesce(j.man_hours, json_extract(q.calculation, '$.personHours')) AS work_hours, coalesce(j.men, json_extract(q.calculation, '$.crew'), 2) AS crew_size, " +
+  "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS services " +
   "FROM jobs j JOIN customers c ON c.id = j.customer_id JOIN properties p ON p.id = j.property_id JOIN quotes q ON q.id = j.quote_id";
 
 async function dashboard(env) {
@@ -562,4 +565,72 @@ async function jobsApi(env, me, m, parts, url, body) {
   }
   if (m === 'DELETE') { await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(jid).run(); return json({ ok: true }); }
   fail(404, 'Not found.');
+}
+
+// ---------------- schedule (drag-and-drop planner) ----------------
+const SCHEDULE_DEFAULTS = { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5 };
+async function scheduleApi(env, me, m, parts, url, body) {
+  if (!parts[1] && m === 'GET') {
+    const from = str(url.searchParams.get('from'), 16), to = str(url.searchParams.get('to'), 16);
+    if (!LOCAL_DT.test(from) || !LOCAL_DT.test(to)) fail(400, 'Choose a date range.');
+    const jobs = (await env.DB.prepare(JOB_LIST + " WHERE j.status != 'Cancelled' AND j.end >= ? AND j.start < ? ORDER BY j.start").bind(from, to).all()).results;
+    const waiting = (await env.DB.prepare(
+      "SELECT q.id, q.number, q.updated_at, json_extract(q.calculation, '$.total') AS total, json_extract(q.calculation, '$.personHours') AS man_hours, " +
+      "coalesce(json_extract(q.calculation, '$.crew'), 2) AS crew_size, json_extract(q.calculation, '$.needsPicker') AS picker, c.name AS customer, c.phone, p.address, p.suburb, p.lat, p.lng, " +
+      "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS services " +
+      "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id " +
+      "WHERE q.status = 'Accepted' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') ORDER BY q.updated_at").all()).results;
+    const b = await business(env);
+    return json({ jobs, waiting, settings: Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}), depot: b.mapStart || null });
+  }
+  if (parts[1] === 'settings' && m === 'PUT') {
+    const b = await business(env), cur = Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {});
+    if (/^\d{2}:\d{2}$/.test(body.dayStart || '')) cur.dayStart = body.dayStart;
+    if (/^\d{2}:\d{2}$/.test(body.dayEnd || '')) cur.dayEnd = body.dayEnd;
+    ['speedKmh', 'roadFactor', 'bufferMinutes'].forEach((k) => { const v = numOrNull(body[k]); if (v != null && v >= 0 && v < 1000) cur[k] = v; });
+    b.schedule = cur;
+    await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('business', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(b)).run();
+    return json({ settings: cur });
+  }
+  if (parts[1] === 'apply' && m === 'POST') return applySchedule(env, me, body);
+  fail(404, 'Not found.');
+}
+
+/** Apply a new arrangement in one transaction. Each entry: {id} (existing job) or {quote_id} (new job), with start, end,
+    crew, men, man_hours, travel_minutes, sequence. Moved jobs are first parked on a private crew name so the database's
+    crew-overlap check only ever sees the final layout. */
+async function applySchedule(env, me, body) {
+  const list = (Array.isArray(body.jobs) ? body.jobs : []).slice(0, 200);
+  if (!list.length) fail(400, 'Nothing to schedule.');
+  const park = [], place = [], created = [];
+  const seenQuotes = {};
+  for (const x of list) {
+    const start = str(x.start, 16), end = str(x.end, 16);
+    if (!LOCAL_DT.test(start) || !LOCAL_DT.test(end) || end <= start) fail(400, 'A job has an invalid time.');
+    const crew = str(x.crew, 60) || 'Crew 1', men = Math.max(1, Math.min(20, parseInt(x.men, 10) || 2));
+    const manHours = numOrNull(x.man_hours), travel = Math.max(0, Math.min(600, parseInt(x.travel_minutes, 10) || 0)), seq = parseInt(x.sequence, 10) || 0;
+    if (x.id) {
+      const j = await env.DB.prepare("SELECT id FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(str(x.id, 40)).first();
+      if (!j) fail(404, 'A job was not found — reload the schedule.');
+      park.push(env.DB.prepare("UPDATE jobs SET crew = '__moving__' || id WHERE id = ?").bind(j.id));
+      place.push(env.DB.prepare("UPDATE jobs SET start = ?, end = ?, crew = ?, men = ?, man_hours = coalesce(?, man_hours), travel_minutes = ?, sequence = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(start, end, crew, men, manHours, travel, seq, j.id));
+    } else {
+      const q = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(str(x.quote_id, 40)).first();
+      if (!q) fail(404, 'That quote was not found.');
+      if (seenQuotes[q.id] || await env.DB.prepare("SELECT 1 AS x FROM jobs WHERE quote_id = ? AND status != 'Cancelled'").bind(q.id).first()) fail(409, q.number + ' is already scheduled.');
+      seenQuotes[q.id] = true;
+      const old = await env.DB.prepare("SELECT id FROM jobs WHERE quote_id = ? AND status = 'Cancelled'").bind(q.id).first();
+      const jid = old ? old.id : newId('job'), title = q.cname + ' — ' + q.number;
+      if (old) place.push(env.DB.prepare("UPDATE jobs SET title = ?, start = ?, end = ?, crew = ?, status = 'Scheduled', men = ?, man_hours = ?, travel_minutes = ?, sequence = ?, started_at = NULL, completed_at = NULL, updated_at = datetime('now') WHERE id = ?")
+        .bind(title, start, end, crew, men, manHours, travel, seq, jid));
+      else place.push(env.DB.prepare("INSERT INTO jobs (id, quote_id, customer_id, property_id, title, start, end, crew, status, notes, men, man_hours, travel_minutes, sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', '', ?, ?, ?, ?)")
+        .bind(jid, q.id, q.customer_id, q.property_id, title, start, end, crew, men, manHours, travel, seq));
+      if (q.status !== 'Accepted') place.push(env.DB.prepare("UPDATE quotes SET status = 'Accepted', updated_at = datetime('now') WHERE id = ?").bind(q.id));
+      created.push({ id: jid, quote: q.number, start });
+    }
+  }
+  await env.DB.batch(park.concat(place));
+  await audit(env, me, 'schedule', 'apply', 'update', { jobs: list.length, created });
+  return json({ ok: true, created });
 }

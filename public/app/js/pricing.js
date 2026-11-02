@@ -26,7 +26,7 @@
 
   var DEFAULTS = {
     version: 'DEFAULT',
-    labourCost: 48,          // $ per person-hour: what labour costs the business
+    labourCost: 48,          // $ per man-hour: what labour costs the business
     markup: 0.35,            // added to every cost to make the price (35% markup ≈ 26% gross margin)
     crew: 2,
     setupHours: 0.5,         // crew hours per job
@@ -150,7 +150,7 @@
     // job items (cost)
     var job = [];
     function add(key, label, cost, detail) { if (cost > 0) job.push({ key: key, label: label, cost: r2(cost), detail: detail || '' }); }
-    add('setup', 'Setup, clean-up & loading', (setupH + loadH) * card.labourCost, r2(setupH + loadH) + ' person-hours');
+    add('setup', 'Setup, clean-up & loading', (setupH + loadH) * card.labourCost, r2(setupH + loadH) + ' man-hours');
     if (pickerHours > 0) {
       var ph = pickerHours / crew, half = ph <= card.picker.halfDayHours, days = Math.ceil(ph / 8);
       add('picker', 'Cherry picker hire', (half ? card.picker.halfDay : days * card.picker.fullDay) + card.picker.delivery,
