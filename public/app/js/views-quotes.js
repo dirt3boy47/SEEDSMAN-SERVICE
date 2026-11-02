@@ -60,7 +60,7 @@
       if (!el.isConnected) return;
       rates = me.rates; biz = me.business || {};
       gis = GIS.create(el.querySelector('#gis'), {
-        start: biz.mapStart, onShapeClick: function (id) { var it = S.items.filter(function (x) { return x.id === id; })[0]; if (it) { S.open[id] = true; renderSheet(); flash(id); if (narrow()) showPane('quote'); } },
+        start: biz.mapStart, onShapeClick: function (id) { if (id.indexOf('drw:') === 0) { addDrawings([id.slice(4)]); return; } var it = S.items.filter(function (x) { return x.id === id; })[0]; if (it) { S.open[id] = true; renderSheet(); flash(id); if (narrow()) showPane('quote'); } },
         onSearchPick: function (p) { if (!S.propertyId) { if (!S.property.address) S.property.address = p.address; if (!S.property.suburb) S.property.suburb = p.suburb; } setHouse(L.latLng(p.lat, p.lng)); dirty(); renderSheet(); }
       });
       if (quoteId) return App.get('quotes/' + encodeURIComponent(quoteId)).then(loadQuote);
@@ -153,7 +153,7 @@
         var c = calc().lines[S.items.indexOf(it)], s = svc(it);
         list.push({ id: it.id, geometry: it.geometry, color: App.cat(s.category).map, label: (it.name || s.name) + (c && c.qty ? ' · ' + App.qty(c.qty, c.unit) : '') });
       });
-      S.drawings.forEach(function (d) { if (!used[d.id]) list.unshift({ id: 'drw:' + d.id, geometry: d.geometry, color: '#cfd8d2', dashed: true, faded: true, label: d.name }); });
+      unusedDrawings().forEach(function (d) { list.unshift({ id: 'drw:' + d.id, geometry: d.geometry, color: '#cfd8d2', dashed: true, faded: true, label: '+ ' + d.name }); });
       gis.setShapes(list);
     }
 
@@ -211,7 +211,49 @@
     function itemsCard(t) {
       return '<div class="card"><div class="card-h"><h2>Services</h2><button class="btn sm primary" id="add-svc">' + icon('plus') + 'Add service</button></div><div class="card-b">' +
         (S.items.length ? S.items.map(function (it, i) { return itemCard(it, t.lines[i]); }).join('') :
-          '<div class="empty" style="padding:20px 6px">' + icon('ruler') + '<b>Add the first service</b>Pick a service, then measure it on the map — the length or area goes straight into the quote.</div>') + '</div></div>';
+          (unusedDrawings().length ? '' : '<div class="empty" style="padding:20px 6px">' + icon('ruler') + '<b>Add the first service</b>Pick a service, then measure it on the map — the length or area goes straight into the quote.</div>')) +
+        savedCard() + '</div></div>';
+    }
+    /** Saved site drawings on this property that aren't on the quote yet. */
+    function unusedDrawings() {
+      var used = {}; S.items.forEach(function (it) { if (it.drawingId) used[it.drawingId] = true; });
+      return S.drawings.filter(function (d) { return !used[d.id] && d.geometry; });
+    }
+    function drawingSvc(d) {
+      var ok = function (id) { return id && rates.services.some(function (x) { return x.id === id && x.active !== false; }); };
+      if (ok(d.service)) return d.service;
+      var want = d.kind === 'area' ? 'area' : d.kind === 'point' ? 'point' : 'line', hit = rates.services.filter(function (x) { return x.active !== false && (want === 'line' ? x.method === 'hedge' : x.measure === want); })[0];
+      return hit ? hit.id : rates.services[0].id;
+    }
+    function savedCard() {
+      var list = unusedDrawings(); if (!list.length) return '';
+      return '<div class="saved-shapes"><div class="saved-h"><b>' + (S.items.length ? 'More saved on this property' : 'Saved on this property') + '</b><small>Tap to add it to this quote — or tap the shape on the map.</small>' +
+        (list.length > 1 ? '<button class="btn sm" data-addsaved="all">' + icon('plus') + 'Add all ' + list.length + '</button>' : '') + '</div>' +
+        list.map(function (d) {
+          var sv = P.serviceOf(rates, drawingSvc(d)), c = App.cat(sv.category), m = d.measure || {}, inp = d.inputs || {};
+          var size = m.area && d.kind === 'area' ? GIS.fmtArea(m.area) : m.count > 1 ? m.count + ' points' : m.length ? GIS.fmtLen(m.length) : d.kind === 'point' ? '1 point' : '';
+          var extra = sv.method === 'hedge' && inp.height ? inp.height + ' m high' : '';
+          return '<button class="saved-row" data-addsaved="' + esc(d.id) + '"><span class="svc-dot" style="background:' + c.color + '">' + icon(c.icon) + '</span><span class="grow"><b>' + esc(d.name) + '</b><small>' + esc([sv.name === d.name ? '' : sv.name, size, extra].filter(Boolean).join(' · ')) + (d.updated_at ? ' · measured ' + App.dateShort(d.updated_at) : '') + '</small></span><span class="saved-add">' + icon('plus') + 'Add</span></button>';
+        }).join('') + '</div>';
+    }
+    /** Turn saved drawings back into quote lines: same service and settings (height, faces, condition…), measured from the shape. */
+    function addDrawings(ids) {
+      var added = [];
+      ids.forEach(function (id) {
+        var d = S.drawings.filter(function (x) { return x.id === id; })[0]; if (!d || S.items.some(function (it) { return it.drawingId === id; })) return;
+        var sid = drawingSvc(d), sv = P.serviceOf(rates, sid), inp = d.inputs ? JSON.parse(JSON.stringify(d.inputs)) : null;
+        if (!inp || d.service !== sid) inp = sv.method === 'hedge' ? { length: null, height: 1.8, depth: 0.8, condition: 'maintained', faces: { top: true, front: true, back: true, lhs: false, rhs: false } } : { qty: null };
+        var it = { id: uid(), service: sid, name: d.name || sv.name, description: sv.description || '', inputs: inp, geometry: null, measure: null, drawingId: d.id, priceOverride: null, notes: '' };
+        var mm = GIS.measureOf(d.geometry), depth = inp.depth;
+        applyMeasure(it, { mode: GIS.modeOf(d.geometry), geometry: d.geometry, length: mm.length, area: mm.area, perimeter: mm.perimeter, depth: mm.depth, count: mm.count, pts: GIS.toLatLngs(d.geometry) });
+        if (sv.method === 'hedge' && GIS.modeOf(d.geometry) !== 'area' && depth) it.inputs.depth = depth; // keep the depth that was set last time
+        S.items.push(it); added.push(it);
+      });
+      if (!added.length) return;
+      S.open = {}; if (added.length === 1) S.open[added[0].id] = true;
+      dirty(); render(); if (narrow() && added.length === 1) showPane('quote');
+      setTimeout(function () { flash(added[added.length - 1].id); }, 50);
+      App.toast(added.length === 1 ? added[0].name + ' added to the quote — check the height and faces.' : added.length + ' saved shapes added to the quote.');
     }
     function itemCard(it, l) {
       var s = svc(it), c = App.cat(s.category), open = !!S.open[it.id];
@@ -347,6 +389,7 @@
       if (tg.closest('#add-svc')) { addServiceMenu(tg.closest('#add-svc')); return; }
       if (tg.closest('#cust-change')) { S.customerId = null; S.propertyId = null; S.drawings = []; S.properties = []; renderSheet(); renderMap(); return; }
       if (tg.closest('#travel-calc')) { workOutTravel(); return; }
+      var sv = tg.closest('[data-addsaved]'); if (sv) { var w = sv.getAttribute('data-addsaved'); addDrawings(w === 'all' ? unusedDrawings().map(function (d) { return d.id; }) : [w]); return; }
       if (tg.closest('#pin-centre')) { setHouse(gis.map.getCenter()); dirty(); App.toast('House pin placed at the map centre. Drag it onto the house.'); return; }
       var cr = tg.closest('[data-cust]'); if (cr) { el.querySelector('#cust-res').hidden = true; pickCustomer(cr.getAttribute('data-cust')); return; }
       var a = tg.closest('[data-act]'); if (!a) return;
