@@ -172,7 +172,9 @@
     var cost = lines.reduce(function (s, l) { return s + l.cost; }, 0) + job.reduce(function (s, j) { return s + j.cost; }, 0);
     var subtotal = lines.reduce(function (s, l) { return s + l.sell; }, 0) + job.reduce(function (s, j) { return s + j.sell; }, 0);
     var risk = r2(subtotal * card.risk), exGst = subtotal + risk, topUp = 0;
-    if (any && exGst < card.minimum) { topUp = r2(card.minimum - exGst); exGst = card.minimum; }
+    var adjust = 0;
+    if (any && num(o.fixedExGst) > 0) { adjust = r2(num(o.fixedExGst) - exGst); exGst = num(o.fixedExGst); } // a set price (e.g. a repeat trim at last time's price)
+    else if (any && exGst < card.minimum) { topUp = r2(card.minimum - exGst); exGst = card.minimum; }
     var gst = r2(exGst * card.gst);
     var labourCost = lines.reduce(function (s, l) { return s + l.labour; }, 0) + (setupH + loadH) * card.labourCost;
     var materials = lines.reduce(function (s, l) { return s + l.materials; }, 0);
@@ -182,7 +184,7 @@
       personHours: personHours, siteHours: siteHours, crew: crew, wasteM3: r2(wasteM3), needsPicker: pickerHours > 0,
       area: r2(lines.reduce(function (s, l) { return s + (l.unit === 'm²' ? l.qty : 0); }, 0)),
       costs: { labour: r2(labourCost), materials: r2(materials), equipment: r2(equipment), disposal: r2(wasteM3 * card.waste.rate), travel: r2(num(o.travelKm) * card.travelRate), total: r2(cost) },
-      subtotal: r2(subtotal), risk: risk, minimumTopUp: topUp, exGst: r2(exGst), gst: gst, total: r2(exGst + gst)
+      subtotal: r2(subtotal), risk: risk, minimumTopUp: topUp, adjust: adjust, exGst: r2(exGst), gst: gst, total: r2(exGst + gst)
     };
     out.profit = r2(out.exGst - out.costs.total);
     out.margin = out.exGst > 0 ? out.profit / out.exGst : 0;
@@ -202,7 +204,7 @@
       if (j.key === 'waste' || j.key === 'picker' || j.key === 'travel') shown.push({ title: j.label, description: j.detail, qty: null, unit: '', amount: j.sell });
       else hiddenTotal += j.sell;
     });
-    hiddenTotal += calc.risk + calc.minimumTopUp;
+    hiddenTotal += calc.risk + calc.minimumTopUp + (calc.adjust || 0);
     var base = shown.reduce(function (s, l) { return s + l.amount; }, 0), left = r2(hiddenTotal);
     shown.forEach(function (l, i) {
       var share = i === shown.length - 1 ? left : r2(base > 0 ? hiddenTotal * l.amount / base : hiddenTotal / shown.length);

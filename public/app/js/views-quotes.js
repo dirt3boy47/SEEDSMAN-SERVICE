@@ -80,7 +80,7 @@
       useCustomer(d.customer); useProperty(d.property, d.drawings);
       S.items = q.items.map(function (it) { var x = P.normaliseItem(it); x.id = x.id || uid(); x.measure = it.measure || null; return x; });
       var o = q.calculation.options || {};
-      S.options = { removeWaste: o.removeWaste !== false, travelKm: o.travelKm || 0, markup: o.markup != null ? o.markup : null, setupHours: o.setupHours != null ? o.setupHours : null };
+      S.options = { removeWaste: o.removeWaste !== false, travelKm: o.travelKm || 0, markup: o.markup != null ? o.markup : null, setupHours: o.setupHours != null ? o.setupHours : null, fixedExGst: o.fixedExGst || null };
       S.notes = q.notes || ''; S.assumptions = q.assumptions || ''; S.exclusions = q.exclusions || '';
       S.dirty = false;
       render(); gis.fit();
@@ -272,7 +272,7 @@
         '<label class="field">Travel, return (km)<input data-o="travelKm" type="number" min="0" step="1" inputmode="numeric" value="' + num(S.options.travelKm) + '"><span class="travel-hint" id="travel-hint"></span></label>' +
         '<label class="field">Setup (crew hours)<input data-o="setupHours" type="number" min="0" step="0.25" placeholder="' + rates.setupHours + '" value="' + num(S.options.setupHours) + '"></label>' +
         '<label class="field">Markup on cost (%)<input data-o="markup" type="number" min="0" step="1" placeholder="' + Math.round(rates.markup * 100) + '" value="' + mk + '"></label>' +
-        '<label class="field">Crew<input disabled value="' + rates.crew + ' people"></label></div></div>';
+        '<label class="field">Fixed price (excl. GST)<input data-o="fixedExGst" type="number" min="0" step="1" placeholder="Calculated" value="' + num(S.options.fixedExGst) + '"></label></div></div>';
     }
     function summaryCard(t) {
       if (!t) return '';
@@ -280,6 +280,7 @@
       t.job.forEach(function (j) { rows.push('<div class="sum-row"><span>' + esc(j.label) + (j.detail ? '<small>' + esc(j.detail) + '</small>' : '') + '</span><b>' + money(j.sell) + '</b></div>'); });
       if (t.risk) rows.push('<div class="sum-row"><span>Contingency<small>' + Math.round(rates.risk * 100) + '%</small></span><b>' + money(t.risk) + '</b></div>');
       if (t.minimumTopUp) rows.push('<div class="sum-row"><span>Minimum charge top-up<small>Minimum ' + money(rates.minimum) + '</small></span><b>' + money(t.minimumTopUp) + '</b></div>');
+      if (t.adjust) rows.push('<div class="sum-row"><span>Fixed price adjustment<small>Price set to ' + money(S.options.fixedExGst) + ' excl. GST</small></span><b>' + money(t.adjust) + '</b></div>');
       rows.push('<div class="sum-row sub"><span>Total excl. GST</span><b>' + money(t.exGst) + '</b></div>');
       rows.push('<div class="sum-row"><span>GST</span><b>' + money(t.gst) + '</b></div>');
       rows.push('<div class="sum-row total"><span>Total incl. GST</span><b>' + money(t.total) + '</b></div>');

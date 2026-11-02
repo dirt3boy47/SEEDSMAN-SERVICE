@@ -359,7 +359,7 @@
         '<label class="field">Actual hours (after the job)<input id="j-actual" type="number" min="0" step="0.25" value="' + (j.actual || '') + '"></label><span></span>' +
         '<label class="field span2">Notes for the crew<textarea id="j-notes">' + esc(j.notes || '') + '</textarea></label></div>' +
         (j.travel ? '<p class="muted small">' + j.travel + ' min from the crew’s previous job, including ' + settings().bufferMinutes + ' min to park' + (j.travelInfo && j.travelInfo.low != null ? ' (drive ' + j.travelInfo.low + '–' + j.travelInfo.high + ' min, ' + (j.travelInfo.source === 'google' ? 'Google traffic' : 'by road') + ')' : '') + (j.guess ? ' (estimated — a property has no house pin)' : '') + '.</p>' : '') +
-        '<div class="actions"><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
+        '<div class="actions"><a class="btn" href="#/jobs/' + esc(j.id) + '">' + icon('check') + (j.status === 'Completed' ? 'Job page' : 'Close out / photos') + '</a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
         '<button class="btn ghost" id="j-un" style="color:var(--danger)">Unschedule</button><span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="j-ok">Save</button></div>', { noFocus: true });
       var men = j.men, q = function (id) { return m.el.querySelector('#' + id); };
       function upd() {

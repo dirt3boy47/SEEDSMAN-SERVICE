@@ -13,7 +13,7 @@
   }
   function val(m, id) { var e = m.querySelector('#' + id); return e ? e.value : ''; }
   function quoteLi(q) { return '<a class="li" href="#/quotes/' + esc(q.id) + '"><span class="grow"><b>' + esc(q.number) + ' ' + App.pill(q.status) + '</b><small>' + App.date(q.created_at) + ' · ' + esc(q.services || 'Hedge trimming') + '</small></span><span class="end"><b class="num">' + money(q.total) + '</b><small>incl. GST</small></span></a>'; }
-  function jobLi(j) { return '<a class="li" href="#/schedule?date=' + esc(j.start.slice(0, 10)) + '"><span class="grow"><b>' + App.date(j.start) + ' · ' + App.time(j.start) + ' ' + App.pill(j.status) + '</b><small>' + esc(j.crew) + ' · ' + esc(j.quote_number) + '</small></span></a>'; }
+  function jobLi(j) { return '<a class="li" href="#/jobs/' + esc(j.id) + '"><span class="grow"><b>' + App.date(j.start) + ' · ' + App.time(j.start) + ' ' + App.pill(j.status) + '</b><small>' + esc(j.crew) + ' · ' + esc(j.quote_number) + '</small></span></a>'; }
   function card(title, body, action) { return '<div class="card"><div class="card-h"><h2>' + title + '</h2>' + (action || '') + '</div>' + body + '</div>'; }
 
   // ======================= customers =======================

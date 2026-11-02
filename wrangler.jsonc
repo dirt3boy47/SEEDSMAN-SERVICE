@@ -8,5 +8,8 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "seedsmans", "database_id": "0248c54b-71a1-4777-9098-c2e1e2c97034", "migrations_dir": "migrations" }
   ],
+  "r2_buckets": [
+    { "binding": "PHOTOS", "bucket_name": "seedsmans-private" }
+  ],
   "observability": { "enabled": true }
 }

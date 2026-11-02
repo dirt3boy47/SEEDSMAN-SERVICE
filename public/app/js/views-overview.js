@@ -8,7 +8,7 @@
       '<span class="end"><b class="num">' + money(q.total) + '</b><small>' + (extra || App.pill(q.status)) + '</small></span></a>';
   }
   function jobRow(j) {
-    return '<a class="li" href="#/schedule?date=' + esc(j.start.slice(0, 10)) + '"><span class="avatar" style="background:var(--info-soft);color:var(--info)">' + icon('calendar') + '</span><span class="grow"><b>' + esc(j.customer) + '</b><small>' + esc(App.addr(j)) + ' · ' + esc(j.crew) + '</small></span>' +
+    return '<a class="li" href="#/jobs/' + esc(j.id) + '"><span class="avatar" style="background:var(--info-soft);color:var(--info)">' + icon('calendar') + '</span><span class="grow"><b>' + esc(j.customer) + '</b><small>' + esc(App.addr(j)) + ' · ' + esc(j.crew) + '</small></span>' +
       '<span class="end"><b>' + App.dateShort(j.start) + '</b><small>' + App.time(j.start) + '–' + App.time(j.end) + '</small></span></a>';
   }
   function section(title, body, link) { return '<div class="card"><div class="card-h"><h2>' + title + '</h2>' + (link || '') + '</div><div class="list">' + body + '</div></div>'; }
@@ -31,9 +31,20 @@
           section('Recent quotes', d.recent.length ? d.recent.map(function (q) { return quoteRow(q); }).join('') : '<div class="empty">' + icon('quote') + '<b>No quotes yet</b><a href="#/quotes/new">Start your first quote</a> — find the property, measure, price, send.</div>', '<a class="link" href="#/quotes">All quotes</a>') +
           (d.follow.length ? section('Needs a follow-up', d.follow.map(function (q) { return quoteRow(q, 'Sent ' + App.ago(q.updated_at)); }).join('')) : '') +
         '</div><div class="stack">' +
+          (d.toClose && d.toClose.length ? section('To close out', d.toClose.map(function (j) { return '<a class="li" href="#/jobs/' + esc(j.id) + '"><span class="avatar" style="background:var(--signal-soft);color:var(--signal)">' + icon('check') + '</span><span class="grow"><b>' + esc(j.customer) + '</b><small>' + esc(App.addr(j)) + ' · ' + App.dateShort(j.start) + '</small></span><span class="end"><b class="link">Close out</b><small>record the hours</small></span></a>'; }).join('')) : '') +
+          (d.trims && d.trims.length ? '<div class="card"><div class="card-h"><h2>Trims due</h2><span class="tag">' + d.trims.length + '</span></div><div class="list" id="trims">' + d.trims.map(function (r) {
+            var days = Math.round((new Date(r.due + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+            return '<div class="li trim"><span class="avatar">' + icon('hedge') + '</span><span class="grow"><b>' + esc(r.customer) + '</b><small>' + esc(App.addr(r)) + ' · last ' + money(r.last_total) + ' · every ' + r.interval_months + ' mo</small>' +
+              '<small class="' + (days < 0 ? 'late' : '') + '">' + (days < 0 ? 'Overdue ' + (-days) + ' day' + (days === -1 ? '' : 's') : days === 0 ? 'Due today' : 'Due in ' + days + ' day' + (days === 1 ? '' : 's')) + ' (' + App.dateShort(r.due) + ')</small>' +
+              '<span class="row trim-acts"><button class="btn sm primary" data-trim="same" data-id="' + esc(r.id) + '">Book same price</button><button class="btn sm" data-trim="requote" data-id="' + esc(r.id) + '">Re-quote</button><button class="btn sm ghost" data-trim="snooze" data-id="' + esc(r.id) + '">+1 month</button><button class="btn sm ghost" data-trim="skip" data-id="' + esc(r.id) + '" title="Remove reminder">✕</button></span></span></div>';
+          }).join('') + '</div></div>' : '') +
           section('Ready to schedule', d.toSchedule.length ? d.toSchedule.map(function (q) { return quoteRow(q, '<a class="link" href="#/schedule?quote=' + esc(q.id) + '">Schedule</a>'); }).join('') : '<div class="empty" style="padding:18px">Accepted quotes waiting for a date show here.</div>') +
           section('Upcoming jobs', d.jobs.length ? d.jobs.map(jobRow).join('') : '<div class="empty" style="padding:18px">Nothing booked yet.</div>', '<a class="link" href="#/schedule">Schedule</a>') +
         '</div></div></div>';
+      ctx.el.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-trim]'); if (!b) return; b.disabled = true;
+        Jobs.trimAction(b.getAttribute('data-id'), b.getAttribute('data-trim'), function () { App.go('#/'); }).catch(function (x) { App.toast(x.message, 'err'); b.disabled = false; });
+      });
     }).catch(function (e) { App.toast(e.message, 'err'); });
   });
 
@@ -75,7 +86,7 @@
 
   App.route('/reports', 'reports', function (ctx) {
     var months = +(ctx.query.months || 12), data = null, showTable = false;
-    App.setTop({ title: 'Reports', sub: 'Quoting performance', actions: '<div class="seg sm" id="range">' + [6, 12, 24].map(function (m) { return '<button type="button" data-m="' + m + '"' + (m === months ? ' class="on"' : '') + '>' + m + ' months</button>'; }).join('') + '</div>' });
+    App.setTop({ title: 'Reports', sub: 'Quoting performance', actions: '<a class="btn sm" href="#/reports/manhours">' + icon('clock') + '<span class="lbl">Man-hours</span></a><div class="seg sm" id="range">' + [6, 12, 24].map(function (m) { return '<button type="button" data-m="' + m + '"' + (m === months ? ' class="on"' : '') + '>' + m + ' months</button>'; }).join('') + '</div>' });
     document.getElementById('range').onclick = function (e) { var b = e.target.closest('[data-m]'); if (!b) return; months = +b.getAttribute('data-m'); document.querySelectorAll('#range button').forEach(function (x) { x.classList.toggle('on', x === b); }); load(); };
     function onResize() { if (data && !showTable) monthChart(ctx.el.querySelector('#chart'), data.months); }
     window.addEventListener('resize', onResize); ctx.onLeave(function () { window.removeEventListener('resize', onResize); });
@@ -102,6 +113,52 @@
       var box = ctx.el.querySelector('#chart');
       if (showTable) box.innerHTML = '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Month</th><th class="r">Quotes</th><th class="r">Quoted</th><th class="r">Won</th></tr></thead><tbody>' + data.months.map(function (m) { return '<tr><td>' + new Date(m.month + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) + '</td><td class="r">' + m.count + '</td><td class="r">' + money(m.quoted, 0) + '</td><td class="r">' + money(m.won, 0) + '</td></tr>'; }).join('') + '</tbody></table></div>';
       else monthChart(box, data.months);
+    }
+    load();
+  });
+  // ======================= man-hours: actual vs estimated =======================
+  App.route('/reports/manhours', 'reports', function (ctx) {
+    var hm = function (h) { return Jobs.hm(h); };
+    App.setTop({ back: '#/reports', title: 'Man-hours', sub: 'What jobs really took, from close-outs' });
+    function load() {
+      App.get('reports/manhours').then(function (d) {
+        if (!ctx.el.isConnected) return;
+        var R = d.rates, t = d.totals || {}, P = window.SeedsmanPricing;
+        var acc = t.est ? t.working / t.est : null;
+        var kpi = function (l, v, sub) { return '<div class="card kpi"><div class="l">' + l + '</div><div class="v">' + v + '</div><div class="d">' + sub + '</div></div>'; };
+        function target(r) { // the rate-card figure this row informs, and the suggested new value
+          if (!r.est || !r.actual) return null;
+          var k = r.est / r.actual;
+          if (r.category === 'setup') return { label: 'Setup (crew hours)', cur: R.setupHours, sug: Math.round(R.setupHours / k * 4) / 4, apply: function (x) { x.setupHours = this.sug; } };
+          if (r.service === 'hedge' && r.tier) { var tier = R.tiers.filter(function (x) { return x.label === r.tier; })[0]; if (!tier) return null; return { label: r.tier + ' hedges (m²/h)', cur: tier.productivity, sug: Math.round(tier.productivity * k), apply: function (x) { x.tiers.forEach(function (y) { if (y.label === r.tier) y.productivity = this.sug; }, this); } }; }
+          var s = P.serviceOf(R, r.service); if (!s) return null;
+          if (s.method === 'unit') return { label: s.name + ' (h each)', cur: s.hoursPerUnit, sug: Math.round(s.hoursPerUnit / k * 20) / 20, apply: function (x) { P.serviceOf(x, r.service).hoursPerUnit = this.sug; } };
+          if (s.method === 'area' || s.method === 'length') return { label: s.name + ' (' + s.unit + '/h)', cur: s.productivity, sug: Math.round(s.productivity * k), apply: function (x) { P.serviceOf(x, r.service).productivity = this.sug; } };
+          return null;
+        }
+        var rows = d.rows.map(function (r) { r.t = target(r); return r; });
+        ctx.el.innerHTML = '<div class="page"><div class="kpis">' + kpi('Jobs closed out', String(t.jobs || 0), 'Each one adds to the database') + kpi('Working man-hours', hm(t.working || 0), 'On site ' + hm(t.onsite || 0) + ' incl. breaks') +
+          kpi('Actual vs estimate', acc == null ? '—' : Math.round(acc * 100) + '%', acc == null ? 'Close out jobs to see this' : acc > 1.05 ? 'Jobs take longer than quoted' : acc < 0.95 ? 'Jobs take less time than quoted' : 'Quotes are on target') +
+          kpi('Breaks', t.onsite ? Math.round((t.breaks || 0) / t.onsite * 100) + '%' : '—', 'of man-hours on site') + '</div>' +
+          '<div class="card"><div class="card-h"><h2>By task</h2><span class="muted small">Suggestions appear after 3 jobs</span></div><div class="tbl-wrap">' +
+          (rows.length ? '<table class="tbl"><thead><tr><th>Task</th><th class="r">Jobs</th><th class="r">Quantity</th><th class="r">Estimated</th><th class="r">Actual</th><th class="r">±</th><th>Rate card</th></tr></thead><tbody>' + rows.map(function (r, i) {
+            var diff = r.est ? Math.round((r.actual - r.est) / r.est * 100) : null;
+            var name = r.category === 'setup' ? 'Setup, clean-up & loading' : r.category === 'other' ? 'Other tasks' : ((P.serviceOf(R, r.service) || {}).name || r.service || 'Task') + (r.tier ? ' · ' + r.tier : '');
+            var sug = r.t && r.jobs >= 3 && r.t.sug !== r.t.cur ? '<button class="btn sm" data-apply="' + i + '">Set ' + esc(r.t.label) + ' to ' + r.t.sug + '</button><small class="muted">now ' + r.t.cur + '</small>' : r.t ? '<small class="muted">' + esc(r.t.label) + ': ' + r.t.cur + (r.jobs < 3 ? ' · ' + (3 - r.jobs) + ' more job' + (r.jobs === 2 ? '' : 's') + ' to suggest' : ' · on target') + '</small>' : '';
+            return '<tr><td><b>' + esc(name) + '</b></td><td class="r">' + r.jobs + '</td><td class="r">' + (r.qty ? App.qty(r.qty, r.unit) : '') + '</td><td class="r">' + hm(r.est) + '</td><td class="r">' + hm(r.actual) + '</td><td class="r ' + (diff > 10 ? 'over' : diff < -10 ? 'under' : '') + '">' + (diff == null ? '' : (diff > 0 ? '+' : '') + diff + '%') + '</td><td>' + sug + '</td></tr>';
+          }).join('') + '</tbody></table>' : '<div class="empty">' + icon('clock') + '<b>No close-outs yet</b>Open a finished job (Schedule › tap the job › Close out) and answer the few questions. Each one builds your man-hours database.</div>') + '</div></div>' +
+          '<div class="card"><div class="card-h"><h2>Recent close-outs</h2></div><div class="list">' + (d.recent.length ? d.recent.map(function (c) {
+            var diff = c.estimated_man_hours ? Math.round((c.working_man_hours - c.estimated_man_hours) / c.estimated_man_hours * 100) : null;
+            return '<a class="li" href="#/jobs/' + esc(c.job_id) + '"><span class="grow"><b>' + esc(c.customer) + '</b><small>' + esc(c.suburb || '') + ' · ' + App.date(c.work_date) + ' · ' + c.men + ' men</small></span><span class="end"><b>' + hm(c.working_man_hours) + '</b><small>est ' + hm(c.estimated_man_hours) + (diff != null ? ' · ' + (diff > 0 ? '+' : '') + diff + '%' : '') + '</small></span></a>';
+          }).join('') : '<div class="empty" style="padding:16px">None yet.</div>') + '</div></div></div>';
+        ctx.el.querySelectorAll('[data-apply]').forEach(function (b) {
+          b.onclick = function () {
+            var r = rows[+b.getAttribute('data-apply')], next = JSON.parse(JSON.stringify(R));
+            r.t.apply(next);
+            App.post('rates', { rates: next }).then(function () { App.refreshMe(); App.toast(r.t.label + ' set to ' + r.t.sug + '. New quotes use it.'); load(); }).catch(function (x) { App.toast(x.message, 'err'); });
+          };
+        });
+      }).catch(function (e) { App.toast(e.message, 'err'); });
     }
     load();
   });

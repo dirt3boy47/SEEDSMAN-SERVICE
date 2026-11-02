@@ -104,7 +104,8 @@ async function activeRates(env) {
 async function api(request, env, url) {
   const parts = url.pathname.split('/').filter(Boolean).slice(1);
   const m = request.method;
-  const body = m === 'POST' || m === 'PUT' ? await request.json().catch(() => ({})) : {};
+  const isUpload = parts[0] === 'jobs' && parts[2] === 'photos' && m === 'POST'; // raw image body
+  const body = !isUpload && (m === 'POST' || m === 'PUT') ? await request.json().catch(() => ({})) : {};
 
   if (parts[0] === 'auth' && parts[1] === 'login' && m === 'POST') {
     const lim = await loginLimit(env, request);
@@ -116,6 +117,7 @@ async function api(request, env, url) {
   }
 
   if (parts[0] === 'public') return publicApi(request, env, parts, url, m, body);
+  if (parts[0] === 'photo' && parts[1] && m === 'GET') return photoGet(env, parts[1], url.searchParams.get('t'));
 
   const me = await userOf(request, env);
   if (!me) fail(401, 'Please sign in.');
@@ -133,12 +135,18 @@ async function api(request, env, url) {
     case 'rates': return ratesApi(env, me, m, body);
     case 'users': return usersApi(env, me, m, body);
     case 'dashboard': if (m === 'GET') return dashboard(env); break;
-    case 'reports': if (m === 'GET') return reports(env, url); break;
+    case 'reports': if (m === 'GET') return parts[1] === 'manhours' ? manHoursReport(env) : reports(env, url); break;
     case 'customers': return customersApi(env, me, m, parts, url, body);
     case 'properties': return propertiesApi(env, me, m, parts, url, body);
     case 'drawings': return drawingsApi(env, me, m, parts, body);
     case 'quotes': return quotesApi(env, me, m, parts, url, body);
-    case 'jobs': return jobsApi(env, me, m, parts, url, body);
+    case 'jobs':
+      if (parts[1] && parts[2] === 'photos') return photosApi(request, env, me, m, parts, url);
+      if (parts[1] && parts[2] === 'closeout' && m === 'POST') return closeoutJob(env, me, parts[1], body);
+      if (parts[1] && !parts[2] && m === 'GET') return jobDetail(env, parts[1], url);
+      return jobsApi(env, me, m, parts, url, body);
+    case 'photos': if (parts[1] && m === 'DELETE') return photoDelete(env, me, parts[1]); break;
+    case 'plans': return plansApi(env, me, m, parts, url, body);
     case 'schedule': return scheduleApi(env, me, m, parts, url, body);
     case 'route': if (m === 'POST') return routeApi(env, body); break;
     case 'google': if (parts[1] === 'check' && m === 'POST') return googleCheck(env, me, url); break;
@@ -243,7 +251,9 @@ async function dashboard(env) {
   const follow = (await env.DB.prepare(QUOTE_LIST + " WHERE q.status = 'Sent' AND q.updated_at <= datetime('now', '-7 days') ORDER BY q.updated_at LIMIT 6").all()).results;
   const toSchedule = (await env.DB.prepare(QUOTE_LIST + " WHERE q.status = 'Accepted' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') ORDER BY q.updated_at LIMIT 6").all()).results;
   const jobs = (await env.DB.prepare(JOB_LIST + " WHERE j.status IN ('Scheduled','In progress') AND substr(j.start, 1, 10) >= ? ORDER BY j.start LIMIT 6").bind(today).all()).results;
-  return json({ kpis: k, recent, follow, toSchedule, jobs });
+  const trims = (await env.DB.prepare(PLAN_LIST + " WHERE r.active = 1 AND r.status = 'Due' AND r.due <= date('now', '+30 days') ORDER BY r.due LIMIT 12").all()).results;
+  const toClose = (await env.DB.prepare(JOB_LIST + " WHERE j.status IN ('Scheduled','In progress') AND j.end < strftime('%Y-%m-%dT%H:%M', 'now', '+10 hours') ORDER BY j.start DESC LIMIT 8").all()).results;
+  return json({ kpis: k, recent, follow, toSchedule, jobs, trims, toClose });
 }
 
 async function reports(env, url) {
@@ -516,7 +526,7 @@ async function saveQuote(env, me, body) {
   }
 
   const o = body.options || {};
-  const options = { removeWaste: !!o.removeWaste, travelKm: numOrNull(o.travelKm) || 0, markup: o.markup != null && o.markup !== '' ? numOrNull(o.markup) : null, setupHours: o.setupHours != null && o.setupHours !== '' ? numOrNull(o.setupHours) : null };
+  const options = { fixedExGst: numOrNull(o.fixedExGst) > 0 ? numOrNull(o.fixedExGst) : null, removeWaste: !!o.removeWaste, travelKm: numOrNull(o.travelKm) || 0, markup: o.markup != null && o.markup !== '' ? numOrNull(o.markup) : null, setupHours: o.setupHours != null && o.setupHours !== '' ? numOrNull(o.setupHours) : null };
   const calc = Pricing.quoteCalc(rates, items, options);
   calc.options = options;
   const itemsJson = JSON.stringify(items), calcJson = JSON.stringify(calc);
@@ -838,4 +848,156 @@ async function googleCheck(env, me, url) {
   }
   await audit(env, me, 'diag', 'google-check', 'check', out);
   return json(out);
+}
+
+// ---------------- job page, photos, close-out (the man-hours database) ----------------
+async function photoToken(env, id) { return hexOf(await crypto.subtle.sign('HMAC', await portalKey(env), new TextEncoder().encode('photo:' + id))).slice(0, 32); }
+async function photoOut(env, p) { return { id: p.id, category: p.category, caption: p.caption, created_at: p.created_at, url: '/api/photo/' + p.id + '?t=' + (await photoToken(env, p.id)) }; }
+async function photoGet(env, id, t) {
+  if (!env.PHOTOS) fail(404, 'No photo storage.');
+  const want = await photoToken(env, id);
+  if (!t || t.length !== want.length) fail(404, 'Not found.');
+  let d = 0; for (let i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ t.charCodeAt(i);
+  if (d) fail(404, 'Not found.');
+  const p = await env.DB.prepare('SELECT object_key, content_type FROM photos WHERE id = ?').bind(id).first();
+  if (!p) fail(404, 'Not found.');
+  const obj = await env.PHOTOS.get(p.object_key);
+  if (!obj) fail(404, 'Not found.');
+  return new Response(obj.body, { headers: { 'Content-Type': p.content_type || 'image/jpeg', 'Cache-Control': 'private, max-age=86400' } });
+}
+const PHOTO_KINDS = ['before', 'after', 'issue'];
+async function photosApi(request, env, me, m, parts) {
+  const j = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?').bind(parts[1]).first();
+  if (!j) fail(404, 'That job was not found.');
+  if (m === 'GET') {
+    const rows = (await env.DB.prepare('SELECT * FROM photos WHERE job_id = ? ORDER BY created_at').bind(j.id).all()).results;
+    return json({ photos: await Promise.all(rows.map((p) => photoOut(env, p))) });
+  }
+  if (m !== 'POST') fail(404, 'Not found.');
+  if (!env.PHOTOS) fail(500, 'Photo storage is not connected.');
+  const url = new URL(request.url), type = (request.headers.get('Content-Type') || '').split(';')[0];
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(type)) fail(400, 'That file is not a photo.');
+  const buf = await request.arrayBuffer();
+  if (!buf.byteLength) fail(400, 'The photo is empty.');
+  if (buf.byteLength > 8 * 1024 * 1024) fail(413, 'That photo is too big (8 MB at most).');
+  const kind = PHOTO_KINDS.indexOf(url.searchParams.get('category')) >= 0 ? url.searchParams.get('category') : 'after';
+  const pid = newId('pho'), key = 'jobs/' + j.id + '/' + pid + (type === 'image/png' ? '.png' : type === 'image/webp' ? '.webp' : '.jpg');
+  await env.PHOTOS.put(key, buf, { httpMetadata: { contentType: type } });
+  await env.DB.prepare('INSERT INTO photos (id, job_id, property_id, category, object_key, caption, file_name, content_type, bytes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(pid, j.id, j.property_id, kind, key, str(url.searchParams.get('caption'), 200), str(url.searchParams.get('name'), 120) || 'photo', type, buf.byteLength, me.id).run();
+  return json({ photo: await photoOut(env, await env.DB.prepare('SELECT * FROM photos WHERE id = ?').bind(pid).first()) });
+}
+async function photoDelete(env, me, id) {
+  const p = await env.DB.prepare('SELECT * FROM photos WHERE id = ?').bind(id).first();
+  if (!p) fail(404, 'That photo was not found.');
+  if (env.PHOTOS) await env.PHOTOS.delete(p.object_key);
+  await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+  await audit(env, me, 'photo', id, 'delete', { job: p.job_id });
+  return json({ ok: true });
+}
+
+/** The tasks a job is made of, from its quote: each service item, plus setup/clean-up and green-waste loading. */
+function jobTasks(q) {
+  const calc = parseJson(q.calculation, {}), items = parseJson(q.hedges, []), lines = calc.lines || [];
+  const out = lines.map((l, i) => {
+    const it = Pricing.normaliseItem(items[i] || {}), inp = it.inputs || {};
+    return { key: it.id || 'item' + i, category: 'service', service: l.service || it.service || 'hedge', name: it.name || l.serviceName || 'Hedge trimming', unit: l.unit || 'm²', qty: l.qty != null ? l.qty : l.area,
+      tier: l.tier || null, height: inp.height != null ? +inp.height : null, condition: inp.condition || null, est: Math.round((l.hours || 0) * 100) / 100 };
+  });
+  const setup = (calc.job || []).find((x) => x.key === 'setup');
+  const crew = calc.crew || 2, totalEst = calc.personHours || 0, itemsEst = out.reduce((s, t) => s + t.est, 0);
+  const setupEst = Math.max(0, Math.round((totalEst - itemsEst) * 100) / 100);
+  out.push({ key: 'setup', category: 'setup', service: null, name: 'Setup, clean-up & loading', unit: null, qty: null, est: setupEst || (setup ? 0.5 * crew : 0) });
+  return { tasks: out, estimate: totalEst, crew, wasteEst: calc.wasteM3 || 0, needsPicker: !!calc.needsPicker };
+}
+async function jobDetail(env, jid) {
+  const j = await env.DB.prepare(JOB_LIST + ' WHERE j.id = ?').bind(jid).first();
+  if (!j) fail(404, 'That job was not found.');
+  const q = await env.DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(j.quote_id).first();
+  const photos = (await env.DB.prepare('SELECT * FROM photos WHERE job_id = ? ORDER BY created_at').bind(jid).all()).results;
+  const closeout = await env.DB.prepare('SELECT * FROM job_closeouts WHERE job_id = ?').bind(jid).first();
+  const tasks = (await env.DB.prepare('SELECT * FROM task_times WHERE job_id = ? ORDER BY rowid').bind(jid).all()).results;
+  const plan = await env.DB.prepare("SELECT * FROM recurring_service_plans WHERE job_id = ? ORDER BY created_at DESC LIMIT 1").bind(jid).first();
+  return json({ job: j, quote: q ? { id: q.id, number: q.number, items: parseJson(q.hedges, []), calculation: parseJson(q.calculation, {}) } : null, plan: q ? jobTasks(q) : null,
+    photos: await Promise.all(photos.map((p) => photoOut(env, p))), closeout: closeout ? Object.assign(closeout, { details: parseJson(closeout.details, {}) }) : null, tasks, trim: plan });
+}
+function minutesBetween(a, b) { const [ah, am] = a.split(':').map(Number), [bh, bm] = b.split(':').map(Number); let d = bh * 60 + bm - (ah * 60 + am); if (d < 0) d += 1440; return d; }
+async function closeoutJob(env, me, jid, body) {
+  const j = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?').bind(jid).first();
+  if (!j) fail(404, 'That job was not found.');
+  if (j.status === 'Cancelled') fail(409, 'That job was cancelled.');
+  const q = await env.DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(j.quote_id).first();
+  const plan = jobTasks(q), date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || '') ? body.date : j.start.slice(0, 10);
+  const arrived = /^\d{2}:\d{2}$/.test(body.arrived || '') ? body.arrived : j.start.slice(11, 16), finished = /^\d{2}:\d{2}$/.test(body.finished || '') ? body.finished : j.end.slice(11, 16);
+  const men = Math.max(1, Math.min(20, parseInt(body.men, 10) || j.men || plan.crew || 2)), breaks = Math.max(0, Math.min(600, parseInt(body.breakMinutes, 10) || 0));
+  const onsite = minutesBetween(arrived, finished);
+  if (onsite <= 0 || onsite > 16 * 60) fail(400, 'Check the arrival and finish times.');
+  const onsiteMH = Math.round(onsite / 60 * men * 100) / 100, workingMH = Math.round(Math.max(0, onsite - breaks) / 60 * men * 100) / 100;
+  const given = Array.isArray(body.tasks) ? body.tasks : [];
+  const rows = plan.tasks.map((t) => { const g = given.find((x) => x && x.key === t.key) || {}; return Object.assign({}, t, { actual: Math.max(0, numOrNull(g.actual) || 0), condition: str(g.condition, 40) || t.condition }); });
+  (given || []).filter((g) => g && g.key && String(g.key).startsWith('extra:') && numOrNull(g.actual) > 0).forEach((g) => rows.push({ key: g.key, category: 'other', service: null, name: str(g.name, 80) || 'Other', unit: null, qty: null, est: 0, actual: numOrNull(g.actual) }));
+  if (!rows.some((r) => r.actual > 0)) fail(400, 'Add the time each task took.');
+  const cid = newId('clo'), stmts = [];
+  stmts.push(env.DB.prepare('DELETE FROM task_times WHERE job_id = ?').bind(jid));
+  stmts.push(env.DB.prepare('DELETE FROM job_closeouts WHERE job_id = ?').bind(jid));
+  stmts.push(env.DB.prepare('INSERT INTO job_closeouts (id, job_id, quote_id, work_date, arrived, finished, men, break_minutes, onsite_man_hours, working_man_hours, estimated_man_hours, access, waste_m3, picker_used, notes, details, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(cid, jid, q.id, date, arrived, finished, men, breaks, onsiteMH, workingMH, plan.estimate || null, str(body.access, 20) || null, numOrNull(body.wasteM3), body.pickerUsed == null ? null : body.pickerUsed ? 1 : 0, str(body.notes, 2000),
+      JSON.stringify({ issues: Array.isArray(body.issues) ? body.issues.map((x) => str(x, 40)).slice(0, 10) : [], weather: str(body.weather, 40) }), me.id));
+  rows.filter((r) => r.actual > 0 || r.est > 0).forEach((r) => stmts.push(env.DB.prepare('INSERT INTO task_times (id, job_id, work_date, category, service, name, unit, qty, tier, height, condition, est_man_hours, actual_man_hours, men) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(newId('tsk'), jid, date, r.category, r.service ?? null, r.name, r.unit ?? null, r.qty ?? null, r.tier ?? null, r.height ?? null, r.condition ?? null, r.est ?? null, Math.round(r.actual * 100) / 100, men)));
+  const now = new Date().toISOString();
+  stmts.push(env.DB.prepare("UPDATE jobs SET status = 'Completed', actual_hours = ?, waste = ?, men = ?, completed_at = coalesce(completed_at, ?), started_at = coalesce(started_at, ?), notes = CASE WHEN ? != '' THEN ? ELSE notes END, updated_at = datetime('now') WHERE id = ?")
+    .bind(workingMH, numOrNull(body.wasteM3) || 0, men, now, now, str(body.notes, 2000), str(body.notes, 2000), jid));
+  // next trim
+  const months = parseInt(body.nextTrimMonths, 10);
+  let due = null;
+  if (months > 0 && months <= 24) {
+    const d = new Date(date + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + months); due = d.toISOString().slice(0, 10);
+    const calc = parseJson(q.calculation, {});
+    stmts.push(env.DB.prepare("UPDATE recurring_service_plans SET active = 0 WHERE property_id = ? AND active = 1").bind(j.property_id));
+    stmts.push(env.DB.prepare("INSERT INTO recurring_service_plans (id, job_id, property_id, due, active, customer_id, quote_id, interval_months, last_total, last_ex_gst, status) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'Due')")
+      .bind(newId('pln'), jid, j.property_id, due, j.customer_id, q.id, months, calc.total || null, calc.exGst || null));
+  }
+  await env.DB.batch(stmts);
+  await audit(env, me, 'job', jid, 'closeout', { workingMH, estimate: plan.estimate, nextTrim: due });
+  return json({ ok: true, workingManHours: workingMH, estimate: plan.estimate, nextTrim: due });
+}
+
+// ---------------- recurring trims ----------------
+const PLAN_LIST = "SELECT r.*, c.name AS customer, c.phone, p.address, p.suburb, q.number AS quote_number, (SELECT j2.start FROM jobs j2 WHERE j2.id = r.job_id) AS last_job " +
+  "FROM recurring_service_plans r JOIN customers c ON c.id = r.customer_id JOIN properties p ON p.id = r.property_id LEFT JOIN quotes q ON q.id = r.quote_id";
+async function plansApi(env, me, m, parts, url, body) {
+  const pid = parts[1];
+  if (!pid && m === 'GET') return json({ plans: (await env.DB.prepare(PLAN_LIST + " WHERE r.active = 1 AND c.deleted_at IS NULL ORDER BY r.due LIMIT 300").all()).results });
+  const r = await env.DB.prepare('SELECT * FROM recurring_service_plans WHERE id = ?').bind(pid).first();
+  if (!r) fail(404, 'That trim reminder was not found.');
+  if (parts[2] === 'quote' && m === 'POST') {
+    const src = await env.DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(r.quote_id).first();
+    if (!src) fail(404, 'The original quote was not found.');
+    const same = body.mode === 'same', calc = parseJson(src.calculation, {}), opts = Object.assign({}, calc.options || {});
+    opts.fixedExGst = same ? (r.last_ex_gst || calc.exGst) : null;
+    const items = parseJson(src.hedges, []).map((it) => Object.assign({}, it, { id: null, priceOverride: same ? it.priceOverride : null }));
+    const res = await saveQuote(env, me, { customerId: src.customer_id, propertyId: src.property_id, items, options: opts, status: same ? 'Accepted' : 'Draft',
+      notes: src.notes, assumptions: src.assumptions, exclusions: src.exclusions });
+    const d = await res.json();
+    await env.DB.prepare("UPDATE recurring_service_plans SET status = ?, new_quote_id = ? WHERE id = ?").bind(same ? 'Booked' : 'Quoted', d.quote.id, r.id).run();
+    await audit(env, me, 'plan', r.id, same ? 'book-same-price' : 'requote', { from: src.number, to: d.quote.number, total: d.quote.calculation.total });
+    return json({ quote: { id: d.quote.id, number: d.quote.number, total: d.quote.calculation.total, status: d.quote.status } });
+  }
+  if (m === 'PUT') {
+    const due = /^\d{4}-\d{2}-\d{2}$/.test(body.due || '') ? body.due : r.due;
+    const status = ['Due', 'Skipped'].indexOf(body.status) >= 0 ? body.status : r.status;
+    const months = body.interval_months != null ? Math.max(1, Math.min(24, parseInt(body.interval_months, 10) || r.interval_months || 4)) : r.interval_months;
+    await env.DB.prepare('UPDATE recurring_service_plans SET due = ?, status = ?, interval_months = ?, active = ? WHERE id = ?').bind(due, status, months, status === 'Skipped' ? 0 : 1, r.id).run();
+    return json({ ok: true });
+  }
+  fail(404, 'Not found.');
+}
+
+// ---------------- man-hours report: actual vs estimated, by service and height band ----------------
+async function manHoursReport(env) {
+  const rows = (await env.DB.prepare("SELECT category, service, tier, unit, count(DISTINCT job_id) AS jobs, sum(qty) AS qty, sum(est_man_hours) AS est, sum(actual_man_hours) AS actual FROM task_times GROUP BY category, service, tier, unit ORDER BY category, service, tier").all()).results;
+  const totals = await env.DB.prepare('SELECT count(*) AS jobs, sum(onsite_man_hours) AS onsite, sum(working_man_hours) AS working, sum(estimated_man_hours) AS est, sum(break_minutes * men) / 60.0 AS breaks FROM job_closeouts').first();
+  const recent = (await env.DB.prepare("SELECT c.work_date, c.working_man_hours, c.estimated_man_hours, c.men, j.id AS job_id, cu.name AS customer, p.suburb FROM job_closeouts c JOIN jobs j ON j.id = c.job_id JOIN customers cu ON cu.id = j.customer_id JOIN properties p ON p.id = j.property_id ORDER BY c.work_date DESC LIMIT 12").all()).results;
+  return json({ rows, totals, recent, rates: await activeRates(env) });
 }

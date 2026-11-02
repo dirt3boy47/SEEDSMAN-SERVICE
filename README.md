@@ -35,6 +35,14 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    and move with it. Tap a job to add or remove men (its length and the jobs after it update), change man-hours, crew,
    time, status or notes, get directions, or unschedule it. **Route** on a day shows the stops on a map in order.
 
+7. **Close out** each job from its **job page** (Schedule › tap the job, or Overview › To close out): arrival and finish
+   times, men, breaks, then the man-hours each task took (pre-split from the estimate), access, slow-downs, green waste,
+   **before/after photos**, and the **next trim** (3/4/6/12 months). Each close-out adds rows to the man-hours database.
+8. **Trims due** on the Overview (within 30 days): **Book same price** (an accepted quote at last time's price, straight
+   to the schedule tray), **Re-quote** (saved measurements at today's rates), +1 month, or remove.
+   **Reports › Man-hours** compares actual with estimated man-hours by task and hedge height band; after 3 jobs it suggests
+   a corrected rate and applies it to the rate card in one tap.
+
 Other pages: **Overview** (open quotes, won this month, win rate, jobs this week, follow-ups), **Customers**,
 **Properties** (job locations with their site drawings, quotes and jobs), **Map** (the full-screen GIS workspace: every job
 location, draw and save site drawings), **Services & pricing** (the rate card), **Reports** (quoted vs won by month, by service,
@@ -81,7 +89,8 @@ All figures are editable on **Services & pricing**; saving makes a new rate card
 
 Cloudflare D1 database `seedsmans`: `customers`, `properties` (+ `lat`/`lng`, migration 0004), `site_drawings`
 (migration 0005: lines, areas and points per property, with measurements), `quotes` (+ append-only `quote_revisions`),
-`jobs` (+ `men`, `man_hours`, `travel_minutes`, `sequence`, migration 0006), `rate_library`, `business_settings`, `user`/`account`/`session`, `request_limits`, `audit_log`.
+`jobs` (+ `men`, `man_hours`, `travel_minutes`, `sequence`, migration 0006), `job_closeouts` and `task_times` (the
+man-hours database) and `recurring_service_plans` (trims; migration 0007), `photos` (files in R2 bucket `seedsmans-private`), `rate_library`, `business_settings`, `user`/`account`/`session`, `request_limits`, `audit_log`.
 `schema/existing.sql` is a copy of the tables that were there before this app. Migrations are applied by hand
 (`wrangler d1 execute seedsmans --remote --file migrations/000N_….sql`).
 
