@@ -164,9 +164,9 @@ async function saveBusiness(env, me, body) {
   if (body.mapStart && isFinite(body.mapStart.lat) && isFinite(body.mapStart.lng)) cur.mapStart = { lat: +body.mapStart.lat, lng: +body.mapStart.lng, zoom: +body.mapStart.zoom || 15 };
   if (body.imagery && typeof body.imagery === 'object') {
     const im = cur.imagery || {};
-    ['nearmapKey', 'metromapKey'].forEach((k) => { if (body.imagery[k] != null) im[k] = str(body.imagery[k], 200).replace(/\s+/g, ''); });
+    ['nearmapKey', 'metromapKey', 'googleKey'].forEach((k) => { if (body.imagery[k] != null) im[k] = str(body.imagery[k], 200).replace(/\s+/g, ''); });
     if (body.imagery.metromapLayer != null) im.metromapLayer = str(body.imagery.metromapLayer, 80) || 'Australia_latest';
-    if (body.imagery.default != null) im.default = ['nearmap', 'metromap', 'clarity', 'world', 'vic', 'street'].indexOf(body.imagery.default) >= 0 ? body.imagery.default : '';
+    if (body.imagery.default != null) im.default = ['nearmap', 'metromap', 'google', 'clarity', 'world', 'vic', 'street'].indexOf(body.imagery.default) >= 0 ? body.imagery.default : '';
     cur.imagery = im;
   }
   if (body.routing && typeof body.routing === 'object' && body.routing.googleKey != null) {
@@ -747,10 +747,27 @@ async function osrmLeg(env, a, b, withGeometry) {
   if (!rt) throw new Error('osrm no route');
   return { km: rt.distance / 1000, min: rt.duration / 60, geometry: withGeometry && rt.geometry ? rt.geometry.coordinates.map((c) => [c[1], c[0]]) : null };
 }
+const GOOGLE_ROUTES_DEFAULT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+/** Google Routes API (computeRoutes, traffic-aware): best guess plus optimistic and pessimistic durations. */
+async function googleRoutesLeg(env, key, a, b, dep) {
+  const url = env.GOOGLE_ROUTES_URL || GOOGLE_ROUTES_DEFAULT;
+  const one = async (model) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters' },
+      body: JSON.stringify({ origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } }, destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
+        travelMode: 'DRIVE', routingPreference: 'TRAFFIC_AWARE_OPTIMAL', departureTime: new Date(dep * 1000).toISOString(), trafficModel: model, regionCode: 'AU', units: 'METRIC' }) });
+    const d = await r.json().catch(() => ({}));
+    const rt = d.routes && d.routes[0];
+    if (!r.ok || !rt || !rt.duration) throw new Error('google routes ' + ((d.error && d.error.message) || r.status));
+    return { km: (rt.distanceMeters || 0) / 1000, min: parseFloat(rt.duration) / 60 };
+  };
+  const [best, low, high] = await Promise.all([one('BEST_GUESS'), one('OPTIMISTIC'), one('PESSIMISTIC')]);
+  return { km: best.km, min: best.min, low: low.min, high: high.min };
+}
 async function googleLeg(env, key, a, b, departUnix) {
   const base = env.GOOGLE_DM_URL || GOOGLE_DM_DEFAULT, now = Math.floor(Date.now() / 1000);
   let dep = departUnix || now;
-  while (dep < now) dep += 7 * 86400; // past times: the same weekday and time next week
+  while (dep < now + 60) dep += 7 * 86400; // past times: the same weekday and time next week
+  try { return await googleRoutesLeg(env, key, a, b, dep); } catch (e) { /* older Distance Matrix API below (projects that still have it) */ }
   const one = async (model) => {
     const u = base + '?origins=' + a.lat + ',' + a.lng + '&destinations=' + b.lat + ',' + b.lng + '&mode=driving&departure_time=' + dep + '&traffic_model=' + model + '&key=' + encodeURIComponent(key);
     const d = await (await fetch(u)).json();

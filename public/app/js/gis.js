@@ -18,13 +18,31 @@
     BASEMAPS = {};
     if (im.nearmapKey) BASEMAPS.nearmap = { label: 'Nearmap (latest, high detail)', layers: [{ url: 'https://api.nearmap.com/tiles/v3/Vert/{z}/{x}/{y}.jpg?apikey=' + encodeURIComponent(im.nearmapKey), o: { maxNativeZoom: 21, attribution: 'Imagery © Nearmap' }, watch: true }, ROADS] };
     if (im.metromapKey) BASEMAPS.metromap = { label: 'MetroMap (latest, high detail)', layers: [{ url: 'https://api-v3.metromap.com.au/tiles/xyz/' + encodeURIComponent(im.metromapLayer || 'Australia_latest') + '/{z}/{y}/{x}.png?key=' + encodeURIComponent(im.metromapKey), o: { maxNativeZoom: 22, attribution: 'Imagery © MetroMap (Aerometrex)' }, watch: true }, ROADS] };
+    if (im.googleKey) BASEMAPS.google = { label: 'Google satellite', google: im.googleKey, layers: [] };
     BASEMAPS.clarity = { label: 'Satellite HD (Esri Clarity)', layers: [CLARITY, ROADS] };
     BASEMAPS.world = { label: 'Satellite (Esri)', layers: [WORLD, ROADS] };
     BASEMAPS.vic = { label: 'Vicmap aerial (VIC, licensed)', layers: [VIC, ROADS] };
     BASEMAPS.street = { label: 'Street map', layers: [OSM] };
-    DEFAULT_BASE = BASEMAPS[im.default] ? im.default : BASEMAPS.nearmap ? 'nearmap' : BASEMAPS.metromap ? 'metromap' : 'world';
+    DEFAULT_BASE = BASEMAPS[im.default] ? im.default : BASEMAPS.nearmap ? 'nearmap' : BASEMAPS.metromap ? 'metromap' : BASEMAPS.google ? 'google' : 'world';
   }
   configure(null);
+
+  // Google Map Tiles API (2D satellite with roads and labels): one session token, reused until it expires (about two weeks).
+  var GTILES = 'https://tile.googleapis.com';
+  var gSessionP = {};
+  function googleSession(key) {
+    try {
+      var c = JSON.parse(localStorage.getItem('seedsman-gsession') || 'null');
+      if (c && c.key === key && c.expiry * 1000 > Date.now() + 3600000) return Promise.resolve(c.session);
+    } catch (e) { /* no storage */ }
+    if (gSessionP[key]) return gSessionP[key];
+    gSessionP[key] = fetch(GTILES + '/v1/createSession?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapType: 'satellite', language: 'en-AU', region: 'AU', layerTypes: ['layerRoadmap'], overlay: false }) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.session) throw new Error((d.error && d.error.message) || 'Google satellite is not available with this key'); return d; }); })
+      .then(function (d) { try { localStorage.setItem('seedsman-gsession', JSON.stringify({ key: key, session: d.session, expiry: +d.expiry || Date.now() / 1000 + 86400 })); } catch (e) { /* ignore */ } return d.session; })
+      .catch(function (e) { delete gSessionP[key]; throw e; });
+    return gSessionP[key];
+  }
   var START = { lat: -38.33, lng: 145.03, zoom: 12 }; // Mornington Peninsula
   var LIVE = { color: '#ffd400', weight: 3, opacity: 1, dashArray: '8 6', interactive: false };
   var CASING = { color: '#000', weight: 6, opacity: 0.45, interactive: false };
@@ -89,15 +107,49 @@
 
     // basemaps
     var baseLayers = [], sel = container.querySelector('.basemap select');
+    var gAttr = null, gTimer = null, current = null;
+    function googleAttribution() { // Google requires its logo and the imagery copyright for the area in view
+      clearTimeout(gTimer);
+      gTimer = setTimeout(function () {
+        var def = BASEMAPS[current]; if (dead || !def || !def.google || !def.session) return;
+        var b = map.getBounds();
+        fetch(GTILES + '/tile/v1/viewport?session=' + def.session + '&key=' + encodeURIComponent(def.google) + '&zoom=' + Math.round(map.getZoom()) +
+          '&north=' + b.getNorth().toFixed(5) + '&south=' + b.getSouth().toFixed(5) + '&east=' + b.getEast().toFixed(5) + '&west=' + b.getWest().toFixed(5))
+          .then(function (r) { return r.json(); }).then(function (d) { if (!dead) setGoogleAttr(d.copyright || ''); }).catch(function () {});
+      }, 500);
+    }
+    function setGoogleAttr(text) {
+      if (gAttr) map.attributionControl.removeAttribution(gAttr);
+      gAttr = '<b class="g-logo">Google</b>' + (text ? ' ' + esc(text) : '');
+      map.attributionControl.addAttribution(gAttr);
+    }
+    map.on('moveend', function () { if (BASEMAPS[current] && BASEMAPS[current].google) googleAttribution(); });
     function setBase(key, auto) {
       if (!BASEMAPS[key]) key = DEFAULT_BASE;
       baseLayers.forEach(function (l) { map.removeLayer(l); }); baseLayers = [];
-      BASEMAPS[key].layers.forEach(function (d, i) {
+      if (gAttr) { map.attributionControl.removeAttribution(gAttr); gAttr = null; }
+      current = key;
+      if (sel) sel.value = key;
+      if (!auto) { try { localStorage.setItem('seedsman-basemap', key); } catch (e) { /* ignore */ } }
+      var def = BASEMAPS[key];
+      if (def.google) {
+        googleSession(def.google).then(function (session) {
+          if (dead || current !== key) return;
+          def.session = session;
+          var tl = L.tileLayer(GTILES + '/v1/2dtiles/{z}/{x}/{y}?session=' + session + '&key=' + encodeURIComponent(def.google), { maxZoom: 22, maxNativeZoom: 21, keepBuffer: 4, crossOrigin: opts.print ? 'anonymous' : undefined }).addTo(map);
+          tl.setZIndex(0); watch(tl); baseLayers.push(tl);
+          setGoogleAttr(''); googleAttribution();
+        }).catch(function (e) {
+          if (dead || current !== key) return;
+          App.toast('Google satellite didn’t start (' + e.message + '). Check the Map Tiles API is enabled for the key. Showing Esri satellite.', 'warn', 8000);
+          setBase('world', true);
+        });
+        return;
+      }
+      def.layers.forEach(function (d, i) {
         var tl = L.tileLayer(d.url, Object.assign({ maxZoom: 22, keepBuffer: 4, crossOrigin: opts.print ? 'anonymous' : undefined }, d.o)).addTo(map);
         tl.setZIndex(i); if (d.watch) watch(tl); baseLayers.push(tl);
       });
-      if (sel) sel.value = key;
-      if (!auto) { try { localStorage.setItem('seedsman-basemap', key); } catch (e) { /* ignore */ } }
     }
     function watch(tl) {
       var ok = 0, bad = 0, done = false;
@@ -332,6 +384,7 @@
       window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true); window.removeEventListener('pointercancel', onCancelPtr, true);
       document.removeEventListener('keydown', onKey);
+      clearTimeout(gTimer);
       map.stop();
       var rm = function () { try { map.remove(); } catch (e) { /* already gone */ } };
       if (map._animatingZoom) setTimeout(rm, 320); else rm(); // let a running zoom animation finish first (Leaflet ends it on a timer)

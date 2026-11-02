@@ -43,15 +43,18 @@ by suburb), **Settings** (business details and document terms, staff logins, app
 
 Road routing runs on the server (`/api/route`): **OSRM** (open source, OpenStreetMap roads) by default, with a range for
 typical traffic (wider in weekday peaks, 7–9:30am and 3:30–6:30pm); responses are cached. Add a **Google Maps API key**
-(Distance Matrix API) in **Settings › Drive times** for Google's traffic predictions at each departure time, with an
-optimistic–pessimistic range; the key never leaves the server. If neither answers, a straight-line estimate is used.
+(**Routes API**; the older Distance Matrix API is used if the project still has it) in **Settings › Drive times** for
+Google's traffic predictions at each departure time, with an optimistic–pessimistic range; the key never leaves the server.
+Google supplies the times only — route lines on the map stay OpenStreetMap (Google's terms don't allow its routes on other maps). If neither answers, a straight-line estimate is used.
 The schedule spaces jobs by these times (+ parking minutes), and **Route** shows the road route, the drive from and back
 to the home base, and each leg's range. The calendar shows each crew's drive from base before its first job ("Leave 6:15am") and back after its last ("Back 11:30am"); the day heading shows the earliest leave time (orange if before the working day). Quote travel uses the same router.
 
 ## Map imagery
 
 **Settings › Map imagery**: add a **Nearmap** API key (Tile API v3, zoom 21) or a **MetroMap** key and layer (XYZ, zoom 22)
-for the most detailed, most recent aerial photos; maps then open with it. Free options: Esri satellite and Esri
+for the most detailed, most recent aerial photos, or a **Google** key with the **Map Tiles API** for Google satellite
+(with roads and labels, Google logo and imagery credits shown as Google requires; restrict that key to this website);
+maps then open with it. Free options: Esri satellite and Esri
 Clarity (sharper, often newer). **Vicmap aerial** (`AERIAL_WM_256`, WMTS) is listed for organisations with Vicmap
 access — the old free `AERIAL_WM` service was retired. Any imagery that fails to load falls back to Esri satellite.
 Keys go only to signed-in staff (never to the customer quote page); restrict them to this site in the provider's account.
