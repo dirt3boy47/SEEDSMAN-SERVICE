@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign In · Seedsman</title>
+<link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+<header class="top"><a class="brand" href="/">Seedsman</a></header>
+<main class="narrow">
+  <h1>Staff sign in</h1>
+  <form id="login" class="card fields">
+    <label>Email<input type="email" id="email" autocomplete="username" required></label>
+    <label>Password<input type="password" id="password" autocomplete="current-password" required></label>
+    <p class="error" id="err" hidden></p>
+    <button class="btn primary" type="submit" id="go">Sign in</button>
+  </form>
+</main>
+<script src="/js/app.js"></script>
+<script>
+  (function () {
+    var next = App.params().next || '/customers/';
+    if (!/^\/[^/]/.test(next)) next = '/customers/';
+    document.getElementById('login').onsubmit = function (e) {
+      e.preventDefault();
+      var err = document.getElementById('err'), go = document.getElementById('go');
+      err.hidden = true; go.disabled = true;
+      App.post('auth/login', { email: document.getElementById('email').value, password: document.getElementById('password').value })
+        .then(function (d) { App.setToken(d.token); location.href = next; })
+        .catch(function (x) { err.textContent = x.message; err.hidden = false; go.disabled = false; });
+    };
+  })();
+</script>
+</body>
+</html>

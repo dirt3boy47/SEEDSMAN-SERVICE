@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rates & Settings · Seedsman</title>
+<link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+<header class="top" id="top"></header>
+<main class="page">
+  <h1>Rates & settings</h1>
+
+  <section class="card">
+    <div class="page-head small"><h2>Rate card</h2><span class="hint" id="r-version"></span></div>
+    <p class="hint">All prices exclude GST. Saving makes a new rate card version; saved quotes keep the rates they were priced with.</p>
+
+    <h3>Labour</h3>
+    <div class="fields four">
+      <label>Labour rate ($ per person-hour)<input type="number" step="0.5" min="0" data-r="labourRate"></label>
+      <label>Crew size (people)<input type="number" step="1" min="1" data-r="crew"></label>
+      <label>Setup & clean-up (crew hours per job)<input type="number" step="0.25" min="0" data-r="setupHours"></label>
+      <label>Tops are slower by (×)<input type="number" step="0.05" min="0" data-r="topFactor"></label>
+    </div>
+
+    <h3>Height tiers</h3>
+    <p class="hint">How many m² of hedge face one person trims per hour, by hedge height. A hedge uses the first tier its height fits under.</p>
+    <table class="tbl edit"><thead><tr><th>Name</th><th>Up to height (m)</th><th>m² per person-hour</th><th>Cherry picker</th><th></th></tr></thead><tbody id="tiers"></tbody></table>
+    <button class="btn small" type="button" id="tier-add">+ Add tier</button>
+
+    <h3>Cherry picker</h3>
+    <div class="fields four">
+      <label>Needed above height (m)<input type="number" step="0.1" min="0" data-r="picker.fromHeight"></label>
+      <label>Half-day hire ($)<input type="number" step="5" min="0" data-r="picker.halfDay"></label>
+      <label>Full-day hire ($)<input type="number" step="5" min="0" data-r="picker.fullDay"></label>
+      <label>Delivery & pick-up ($)<input type="number" step="5" min="0" data-r="picker.delivery"></label>
+      <label>Half day covers (hours on site)<input type="number" step="0.5" min="0" data-r="picker.halfDayHours"></label>
+    </div>
+
+    <h3>Hedge condition</h3>
+    <p class="hint">Multiplies the time and the green waste for a hedge.</p>
+    <table class="tbl edit"><thead><tr><th>Condition</th><th>Time ×</th><th>Green waste ×</th><th></th></tr></thead><tbody id="conds"></tbody></table>
+    <button class="btn small" type="button" id="cond-add">+ Add condition</button>
+
+    <h3>Green waste, travel and extras</h3>
+    <div class="fields four">
+      <label>Clippings (m³ per m² cut)<input type="number" step="0.005" min="0" data-r="waste.m3PerM2"></label>
+      <label>Disposal ($ per m³)<input type="number" step="1" min="0" data-r="waste.rate"></label>
+      <label>Loading (minutes per m³)<input type="number" step="1" min="0" data-r="waste.loadMinutesPerM3"></label>
+      <label>Equipment & consumables ($ per job)<input type="number" step="1" min="0" data-r="equipment"></label>
+      <label>Travel ($ per km)<input type="number" step="0.05" min="0" data-r="travelRate"></label>
+      <label>Contingency (%)<input type="number" step="1" min="0" data-r="risk" data-pct="1"></label>
+      <label>Minimum charge ($ excl. GST)<input type="number" step="5" min="0" data-r="minimum"></label>
+      <label>GST (%)<input type="number" step="1" min="0" data-r="gst" data-pct="1"></label>
+    </div>
+
+    <h3>Try it</h3>
+    <p class="hint" id="example"></p>
+    <div class="row"><button class="btn primary" type="button" id="r-save">Save rate card</button><button class="btn" type="button" id="r-defaults">Fill in suggested rates</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Business details</h2>
+    <p class="hint">Shown on quotes.</p>
+    <form class="fields two" id="biz" autocomplete="off">
+      <label>Business name<input type="text" id="b-name"></label>
+      <label>Trading name<input type="text" id="b-tradingName"></label>
+      <label>Phone<input type="tel" id="b-phone"></label>
+      <label>Email (copied on emailed quotes)<input type="email" id="b-email"></label>
+      <label>ABN<input type="text" id="b-abn"></label>
+      <label>Quotes valid for (days)<input type="number" id="b-days" min="1" max="365"></label>
+      <div class="row wide"><button class="btn" type="submit">Save business details</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Staff logins</h2>
+    <div id="users"></div>
+    <form class="fields four" id="user-add" autocomplete="off">
+      <label>Name<input type="text" id="u-name"></label>
+      <label>Email<input type="email" id="u-email"></label>
+      <label>Password (8+ characters)<input type="text" id="u-pw"></label>
+      <label>Role<select id="u-role"><option value="field">Staff</option><option value="admin">Admin</option></select></label>
+      <div class="row wide4"><button class="btn" type="submit">Add login</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Your password</h2>
+    <form class="fields three" id="pw" autocomplete="off">
+      <label>Current password<input type="password" id="pw-cur" autocomplete="current-password"></label>
+      <label>New password (8+ characters)<input type="password" id="pw-new" autocomplete="new-password"></label>
+      <div class="row"><button class="btn" type="submit">Change password</button></div>
+    </form>
+  </section>
+</main>
+<script src="/js/app.js"></script>
+<script src="/js/rates.js"></script>
+<script>
+  (function () {
+    var $ = function (id) { return document.getElementById(id); }, esc = App.esc, R = window.SeedsmanRates;
+    App.header('settings');
+    var rates = R.normalise(null);
+    function getPath(o, p) { return p.split('.').reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
+    function setPath(o, p, v) { var k = p.split('.'), last = k.pop(); k.reduce(function (x, kk) { return x[kk]; }, o)[last] = v; }
+
+    function fill() {
+      document.querySelectorAll('[data-r]').forEach(function (el) { var v = getPath(rates, el.getAttribute('data-r')); el.value = el.hasAttribute('data-pct') ? Math.round(v * 1000) / 10 : v; });
+      $('tiers').innerHTML = rates.tiers.map(function (t, i) {
+        return '<tr data-i="' + i + '"><td><input data-t="label" value="' + esc(t.label) + '"></td><td><input type="number" step="0.1" min="0" data-t="upTo" value="' + t.upTo + '"></td><td><input type="number" step="1" min="1" data-t="productivity" value="' + t.productivity + '"></td><td class="pk"></td><td><button class="link danger" type="button" data-del-tier="' + i + '">Remove</button></td></tr>';
+      }).join('');
+      $('conds').innerHTML = rates.conditions.map(function (c, i) {
+        return '<tr data-i="' + i + '"><td><input data-c="label" value="' + esc(c.label) + '"></td><td><input type="number" step="0.1" min="0" data-c="time" value="' + c.time + '"></td><td><input type="number" step="0.1" min="0" data-c="waste" value="' + c.waste + '"></td><td>' + (i ? '<button class="link danger" type="button" data-del-cond="' + i + '">Remove</button>' : '') + '</td></tr>';
+      }).join('');
+      $('r-version').textContent = 'In use: ' + rates.version + (rates.approval === 'sample' ? ' (sample)' : '');
+      example();
+    }
+    function read() {
+      document.querySelectorAll('[data-r]').forEach(function (el) { var v = parseFloat(el.value) || 0; setPath(rates, el.getAttribute('data-r'), el.hasAttribute('data-pct') ? v / 100 : v); });
+      rates.tiers = Array.prototype.map.call($('tiers').children, function (tr) {
+        return { label: tr.querySelector('[data-t=label]').value || 'Tier', upTo: parseFloat(tr.querySelector('[data-t=upTo]').value) || 0, productivity: parseFloat(tr.querySelector('[data-t=productivity]').value) || 1 };
+      });
+      rates.conditions = Array.prototype.map.call($('conds').children, function (tr, i) {
+        var old = rates.conditions[i] || {}, label = tr.querySelector('[data-c=label]').value || 'Condition';
+        return { id: old.id || label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: label, time: parseFloat(tr.querySelector('[data-c=time]').value) || 1, waste: parseFloat(tr.querySelector('[data-c=waste]').value) || 1 };
+      });
+    }
+    function example() {
+      Array.prototype.forEach.call($('tiers').children, function (tr) {
+        var up = parseFloat(tr.querySelector('[data-t=upTo]').value) || 0;
+        var lowerBound = 0; Array.prototype.forEach.call($('tiers').children, function (o) { var u = parseFloat(o.querySelector('[data-t=upTo]').value) || 0; if (u < up && u > lowerBound) lowerBound = u; });
+        var from = rates.picker.fromHeight; tr.querySelector('.pk').textContent = lowerBound >= from ? 'Yes' : up > from ? 'Above ' + from + ' m' : '—';
+      });
+      var h = { length: 20, height: 1.8, depth: 0.8, condition: 'maintained', faces: { top: true, front: true, back: true } };
+      var t = R.quoteCalc(rates, [h], { removeWaste: true });
+      var h2 = { length: 20, height: 4, depth: 1, condition: 'maintained', faces: { top: true, front: true, back: true } };
+      var t2 = R.quoteCalc(rates, [h2], { removeWaste: true });
+      $('example').innerHTML = 'A 20 m hedge, 1.8 m high and 0.8 m deep, front + back + top, waste taken away: <b>' + App.m2(t.area) + ', ' + t.personHours + ' person-hours, ' + App.money(t.exGst) + ' excl. GST (' + App.money(t.total) + ' incl.)</b>.<br>' +
+        'The same hedge at 4 m high and 1 m deep: <b>' + App.m2(t2.area) + ', ' + t2.personHours + ' person-hours' + (t2.needsPicker ? ', cherry picker' : '') + ', ' + App.money(t2.exGst) + ' excl. GST (' + App.money(t2.total) + ' incl.)</b>.';
+    }
+    document.querySelector('main').addEventListener('input', function (e) { if (e.target.closest('#biz,#user-add,#pw')) return; read(); example(); });
+    $('tiers').onclick = function (e) { var b = e.target.closest('[data-del-tier]'); if (!b) return; read(); if (rates.tiers.length < 2) return; rates.tiers.splice(+b.getAttribute('data-del-tier'), 1); fill(); };
+    $('conds').onclick = function (e) { var b = e.target.closest('[data-del-cond]'); if (!b) return; read(); rates.conditions.splice(+b.getAttribute('data-del-cond'), 1); fill(); };
+    $('tier-add').onclick = function () { read(); var last = rates.tiers[rates.tiers.length - 1]; rates.tiers.push({ label: 'New tier', upTo: last.upTo + 2, productivity: Math.max(5, last.productivity - 4) }); fill(); };
+    $('cond-add').onclick = function () { read(); rates.conditions.push({ id: 'c' + Date.now().toString(36), label: 'New condition', time: 1, waste: 1 }); fill(); };
+    $('r-defaults').onclick = function () { var v = rates.version, a = rates.approval; rates = R.normalise(R.DEFAULTS); rates.version = v; rates.approval = a; fill(); App.toast('Suggested rates filled in. Check them, then Save rate card.'); };
+    $('r-save').onclick = function () {
+      read();
+      App.post('rates', { rates: rates }).then(function (d) { rates = d.rates; fill(); App.toast('Rate card saved as ' + rates.version + '.'); }).catch(function (x) { App.toast(x.message); });
+    };
+
+    function loadUsers() {
+      App.get('users').then(function (d) {
+        $('users').innerHTML = '<table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead><tbody>' + d.users.map(function (u) {
+          return '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.email) + '</td><td>' + (u.role === 'field' ? 'Staff' : esc(u.role.charAt(0).toUpperCase() + u.role.slice(1))) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      }).catch(function () { $('users').innerHTML = '<p class="hint">Only admins can see and add staff logins.</p>'; $('user-add').hidden = true; });
+    }
+    $('user-add').onsubmit = function (e) {
+      e.preventDefault();
+      App.post('users', { name: $('u-name').value, email: $('u-email').value, password: $('u-pw').value, role: $('u-role').value })
+        .then(function () { App.toast('Login added. Give them the email and password.'); $('user-add').reset(); loadUsers(); }).catch(function (x) { App.toast(x.message); });
+    };
+    $('biz').onsubmit = function (e) {
+      e.preventDefault();
+      App.put('business', { name: $('b-name').value, tradingName: $('b-tradingName').value, phone: $('b-phone').value, email: $('b-email').value, abn: $('b-abn').value, quoteValidityDays: $('b-days').value })
+        .then(function () { App.toast('Business details saved.'); }).catch(function (x) { App.toast(x.message); });
+    };
+    $('pw').onsubmit = function (e) {
+      e.preventDefault();
+      App.post('me/password', { current: $('pw-cur').value, password: $('pw-new').value })
+        .then(function () { App.toast('Password changed. Your other devices are signed out.'); $('pw').reset(); }).catch(function (x) { App.toast(x.message); });
+    };
+
+    App.me().then(function (d) {
+      rates = d.rates; fill();
+      var b = d.business || {};
+      $('b-name').value = b.name || ''; $('b-tradingName').value = b.tradingName || ''; $('b-phone').value = b.phone || ''; $('b-email').value = b.email || ''; $('b-abn').value = b.abn || ''; $('b-days').value = b.quoteValidityDays || 30;
+      loadUsers();
+    });
+  })();
+</script>
+</body>
+</html>

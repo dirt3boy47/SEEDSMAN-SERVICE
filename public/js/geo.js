@@ -35,5 +35,43 @@
     for (var i = 1; i < lls.length; i++) s += geodesic([lls[i - 1].lng, lls[i - 1].lat], [lls[i].lng, lls[i].lat]);
     return s;
   }
-  global.Geo = { geodesic: geodesic, pathLength: pathLength };
+  /** Area in m² of a ring of Leaflet LatLngs: projected onto a plane tangent to the GRS80 ellipsoid at its centre
+      (accurate to well under 0.1% for anything property-sized). */
+  function ringArea(lls) {
+    if (lls.length < 3) return 0;
+    var A = 6378137, F = 1 / 298.257222101, E2 = F * (2 - F), lat0 = 0, lng0 = 0;
+    lls.forEach(function (p) { lat0 += p.lat; lng0 += p.lng; }); lat0 /= lls.length; lng0 /= lls.length;
+    var s = Math.sin(lat0 * D2R), w = Math.sqrt(1 - E2 * s * s);
+    var M = A * (1 - E2) / (w * w * w), N = A / w; // meridional and prime-vertical radii
+    var xy = lls.map(function (p) { return [(p.lng - lng0) * D2R * N * Math.cos(lat0 * D2R), (p.lat - lat0) * D2R * M]; });
+    var t = 0;
+    for (var i = 0; i < xy.length; i++) { var a = xy[i], b = xy[(i + 1) % xy.length]; t += a[0] * b[1] - b[0] * a[1]; }
+    return Math.abs(t / 2);
+  }
+  function perimeter(lls) { return lls.length < 2 ? 0 : pathLength(lls) + (lls.length > 2 ? pathLength([lls[lls.length - 1], lls[0]]) : 0); }
+  /** Ramer–Douglas–Peucker line simplification of [x, y] screen points (from GeoCanvas js/ink.js). */
+  function simplify(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    function distToSeg(p, a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      var t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+      return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+    }
+    var keep = pts.map(function () { return false; }); keep[0] = keep[pts.length - 1] = true;
+    var stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      var se = stack.pop(), s = se[0], e = se[1], md = -1, idx = s;
+      for (var i = s + 1; i < e; i++) { var d = distToSeg(pts[i], pts[s], pts[e]); if (d > md) { md = d; idx = i; } }
+      if (md > tol) { keep[idx] = true; stack.push([s, idx], [idx, e]); }
+    }
+    return pts.filter(function (_, i) { return keep[i]; });
+  }
+  /** A hedge measured as an outline (Area mode): its length and depth, treating it as a band of even width.
+      For a band, perimeter ≈ 2(L + D) and area ≈ L × D, so L and D are the roots of t² − (P/2)t + A = 0. */
+  function bandSize(area, perim) {
+    var h = perim / 4, disc = h * h - area;
+    var L = h + Math.sqrt(Math.max(0, disc));
+    return { length: L, depth: L > 0 ? area / L : 0 };
+  }
+  global.Geo = { geodesic: geodesic, pathLength: pathLength, ringArea: ringArea, perimeter: perimeter, simplify: simplify, bandSize: bandSize };
 })(window);

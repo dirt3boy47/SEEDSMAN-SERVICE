@@ -1,6 +1,12 @@
-// Cloudflare Workers static site: everything in ./public is served as-is.
+// Cloudflare Worker `seedsmans`: serves public/ and the staff API (worker/index.js) with the D1 database `seedsmans`.
+// Deployed automatically by Cloudflare Workers Builds on every push to main.
 {
   "name": "seedsmans",
+  "main": "worker/index.js",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "./public" }
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "seedsmans", "database_id": "0248c54b-71a1-4777-9098-c2e1e2c97034", "migrations_dir": "migrations" }
+  ],
+  "observability": { "enabled": true }
 }
