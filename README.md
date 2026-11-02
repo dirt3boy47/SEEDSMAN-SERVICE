@@ -39,6 +39,14 @@ Other pages: **Overview** (open quotes, won this month, win rate, jobs this week
 location, draw and save site drawings), **Services & pricing** (the rate card), **Reports** (quoted vs won by month, by service,
 by suburb), **Settings** (business details and document terms, staff logins, appearance, password).
 
+## Map imagery
+
+**Settings › Map imagery**: add a **Nearmap** API key (Tile API v3, zoom 21) or a **MetroMap** key and layer (XYZ, zoom 22)
+for the most detailed, most recent aerial photos; maps then open with it. Free options: Esri satellite and Esri
+Clarity (sharper, often newer). **Vicmap aerial** (`AERIAL_WM_256`, WMTS) is listed for organisations with Vicmap
+access — the old free `AERIAL_WM` service was retired. Any imagery that fails to load falls back to Esri satellite.
+Keys go only to signed-in staff (never to the customer quote page); restrict them to this site in the provider's account.
+
 ## Pricing (`public/app/js/pricing.js`, used by the browser and the Worker)
 
 Everything is excluding GST until the end.

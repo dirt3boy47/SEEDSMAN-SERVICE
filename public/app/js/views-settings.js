@@ -98,7 +98,7 @@
   App.route('/settings', 'settings', function (ctx) {
     App.setTop({ title: 'Settings', sub: 'Business, documents, staff and appearance' });
     App.refreshMe().then(function (me) {
-      var b = me.business || {}, f = function (id, label, v, type, span) { return '<label class="field' + (span ? ' ' + span : '') + '">' + label + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v || '') + '"></label>'; };
+      var b = me.business || {}, im = b.imagery || {}, f = function (id, label, v, type, span) { return '<label class="field' + (span ? ' ' + span : '') + '">' + label + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v || '') + '"></label>'; };
       var theme = (function () { try { return localStorage.getItem('seedsman-theme') || 'auto'; } catch (e) { return 'auto'; } })();
       ctx.el.innerHTML = '<div class="page"><div class="cols"><div class="stack">' +
         '<div class="card"><div class="card-h"><h2>Business details</h2><span class="muted small">Shown on quote documents</span></div><div class="card-b grid2">' +
@@ -110,6 +110,11 @@
         '<div class="card"><div class="card-h"><h2>Staff logins</h2></div><div id="users"></div><div class="card-b grid4" id="u-form"><label class="field">Name<input id="u-name"></label><label class="field">Email<input id="u-email" type="email"></label><label class="field">Password (8+)<input id="u-pw"></label><label class="field">Role<select id="u-role"><option value="field">Staff</option><option value="admin">Admin</option></select></label><div class="full"><button class="btn" id="u-add">' + icon('plus') + 'Add login</button></div></div></div>' +
         '</div><div class="stack">' +
         '<div class="card"><div class="card-h"><h2>Appearance</h2></div><div class="card-b"><div class="seg" id="theme">' + [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(function (t) { return '<button type="button" data-t="' + t[0] + '"' + (t[0] === theme ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><p class="muted small">Automatic follows the device, like GeoCanvas.</p></div></div>' +
+        '<div class="card"><div class="card-h"><h2>Map imagery</h2></div><div class="card-b stack"><p class="muted small" style="margin:0">For the sharpest, most recent aerial photos of Victoria, add a Nearmap or MetroMap subscription key. Only signed-in staff use it; customers never see it. Restrict the key to this website’s address in your Nearmap / MetroMap account.</p>' +
+          '<label class="field">Nearmap API key<input id="im-nm" type="password" autocomplete="off" value="' + esc(im.nearmapKey || '') + '" placeholder="From Nearmap › Account › API keys"></label>' +
+          '<div class="grid2"><label class="field">MetroMap API key<input id="im-mm" type="password" autocomplete="off" value="' + esc(im.metromapKey || '') + '" placeholder="From MetroMap support"></label><label class="field">MetroMap layer<input id="im-ml" value="' + esc(im.metromapLayer || 'Australia_latest') + '"></label></div>' +
+          '<label class="field">Open maps with<select id="im-def">' + [['', 'Best available'], ['nearmap', 'Nearmap'], ['metromap', 'MetroMap'], ['clarity', 'Satellite HD (Esri Clarity)'], ['world', 'Satellite (Esri)'], ['vic', 'Vicmap aerial (licensed)'], ['street', 'Street map']].map(function (o) { return '<option value="' + o[0] + '"' + ((im.default || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+          '<div><button class="btn" id="im-save">' + icon('save') + 'Save imagery</button></div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Home base</h2></div><div class="card-b stack"><p class="muted small" style="margin:0">Where the crew starts from. Quotes work out the return trip from here.</p>' +
           '<label class="field">Address<input id="hb-addr" value="' + esc((b.depot && b.depot.address) || '') + '" placeholder="Start typing your yard or home address"></label><div class="muted small" id="hb-note">' + (b.depot ? 'Saved: ' + esc(b.depot.address) : 'Not set yet.') + '</div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Map start</h2></div><div class="card-b"><p class="muted small" style="margin-top:0">New maps open on ' + (b.mapStart ? 'your saved spot' : 'the Mornington Peninsula') + '.</p><button class="btn" id="map-here">' + icon('gps') + 'Use my current location</button></div></div>' +
@@ -121,6 +126,12 @@
           .then(function () { App.refreshMe(); App.toast('Business details saved.'); }).catch(function (x) { App.toast(x.message, 'err'); });
       };
       $('theme').onclick = function (e) { var t = e.target.closest('[data-t]'); if (!t) return; ctx.el.querySelectorAll('#theme button').forEach(function (x) { x.classList.toggle('on', x === t); }); var v = t.getAttribute('data-t'); if (v === 'auto') { document.documentElement.removeAttribute('data-theme'); try { localStorage.setItem('seedsman-theme', 'auto'); } catch (er) { /* ignore */ } } else { document.documentElement.setAttribute('data-theme', v); try { localStorage.setItem('seedsman-theme', v); } catch (er) { /* ignore */ } } };
+      $('im-save').onclick = function () {
+        App.put('business', { imagery: { nearmapKey: $('im-nm').value, metromapKey: $('im-mm').value, metromapLayer: $('im-ml').value, default: $('im-def').value } }).then(function () {
+          try { localStorage.removeItem('seedsman-basemap'); } catch (e) { /* ignore */ }
+          return App.refreshMe();
+        }).then(function () { App.toast('Imagery saved. Maps open with it from now on (the Satellite menu on any map switches).'); }).catch(function (x) { App.toast(x.message, 'err'); });
+      };
       GIS.addressInput($('hb-addr'), { near: function () { return b.depot || b.mapStart || GIS.START; }, onPick: function (pl) {
         var depot = { lat: pl.lat, lng: pl.lng, address: [pl.address, pl.suburb, pl.state].filter(Boolean).join(', ') };
         App.put('business', { depot: depot, mapStart: b.mapStart || { lat: pl.lat, lng: pl.lng, zoom: 13 } }).then(function () { b.depot = depot; $('hb-note').textContent = 'Saved: ' + depot.address; App.refreshMe(); App.toast('Home base saved. Quotes will work out travel from here.'); }).catch(function (x) { App.toast(x.message, 'err'); });

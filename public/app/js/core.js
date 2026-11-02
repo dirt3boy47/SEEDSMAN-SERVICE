@@ -185,12 +185,12 @@
 
   var meP = null;
   function me() { if (!meP) meP = call('GET', 'me'); return meP; }
-  function refreshMe() { meP = null; return me(); }
+  function refreshMe() { meP = null; return me().then(function (d) { if (window.GIS) GIS.configure((d.business || {}).imagery); return d; }); }
 
   function start() {
     applyTheme(theme());
     if (!token()) { goLogin(); return; }
-    me().then(function (d) { shell(d); window.addEventListener('hashchange', render); render(); })
+    me().then(function (d) { if (window.GIS) GIS.configure((d.business || {}).imagery); shell(d); window.addEventListener('hashchange', render); render(); })
       .catch(function (e) { toast(e.message, 'err', 8000); });
   }
 

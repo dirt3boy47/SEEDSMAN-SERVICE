@@ -155,6 +155,13 @@ async function saveBusiness(env, me, body) {
   ['terms', 'paymentTerms'].forEach((k) => { if (body[k] != null) cur[k] = str(body[k], 4000); });
   if (body.quoteValidityDays != null) cur.quoteValidityDays = Math.max(1, Math.min(365, parseInt(body.quoteValidityDays, 10) || 30));
   if (body.mapStart && isFinite(body.mapStart.lat) && isFinite(body.mapStart.lng)) cur.mapStart = { lat: +body.mapStart.lat, lng: +body.mapStart.lng, zoom: +body.mapStart.zoom || 15 };
+  if (body.imagery && typeof body.imagery === 'object') {
+    const im = cur.imagery || {};
+    ['nearmapKey', 'metromapKey'].forEach((k) => { if (body.imagery[k] != null) im[k] = str(body.imagery[k], 200).replace(/\s+/g, ''); });
+    if (body.imagery.metromapLayer != null) im.metromapLayer = str(body.imagery.metromapLayer, 80) || 'Australia_latest';
+    if (body.imagery.default != null) im.default = ['nearmap', 'metromap', 'clarity', 'world', 'vic', 'street'].indexOf(body.imagery.default) >= 0 ? body.imagery.default : '';
+    cur.imagery = im;
+  }
   if (body.depot && isFinite(body.depot.lat) && isFinite(body.depot.lng)) cur.depot = { lat: +body.depot.lat, lng: +body.depot.lng, address: str(body.depot.address, 200) };
   await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('business', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(cur)).run();
   await audit(env, me, 'business', 'business', 'update', cur);

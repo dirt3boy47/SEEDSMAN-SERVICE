@@ -6,14 +6,25 @@
   var Geo = window.Geo, icon = App.icon, esc = App.esc;
   var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
   var ROADS = { url: ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', o: { maxNativeZoom: 19, attribution: 'Roads © Esri' } };
-  var VIC = { url: 'https://base.maps.vic.gov.au/wmts/AERIAL_WM/EPSG:3857/{z}/{x}/{y}.png', o: { maxNativeZoom: 20, attribution: 'Imagery © State of Victoria (Vicmap), CC BY 4.0' }, watch: true };
+  // Vicmap Basemaps aerial (WMTS, Web Mercator 256 px). A licensed service: it falls back to world imagery if it doesn't load.
+  var VIC = { url: 'https://base.maps.vic.gov.au/service?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=AERIAL_WM_256&STYLE=default&FORMAT=image/png&TILEMATRIXSET=EPSG:3857:256&TILEMATRIX=EPSG:3857:256:{z}&TILEROW={y}&TILECOL={x}', o: { maxNativeZoom: 20, attribution: 'Imagery © State of Victoria (Vicmap)' }, watch: true };
   var WORLD = { url: ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', o: { maxNativeZoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' } };
+  var CLARITY = { url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', o: { maxNativeZoom: 20, attribution: 'Imagery © Esri (Clarity), Maxar' }, watch: true };
   var OSM = { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', o: { maxNativeZoom: 19, attribution: '© OpenStreetMap contributors' } };
-  var BASEMAPS = {
-    world: { label: 'Satellite', layers: [WORLD, ROADS] },
-    vic: { label: 'Satellite (Vicmap, VIC only)', layers: [VIC, ROADS] },
-    street: { label: 'Street map', layers: [OSM] }
-  };
+  var BASEMAPS = {}, DEFAULT_BASE = 'world';
+  /** Build the imagery list; subscription imagery (Nearmap, MetroMap) appears when its API key is set in Settings. */
+  function configure(im) {
+    im = im || {};
+    BASEMAPS = {};
+    if (im.nearmapKey) BASEMAPS.nearmap = { label: 'Nearmap (latest, high detail)', layers: [{ url: 'https://api.nearmap.com/tiles/v3/Vert/{z}/{x}/{y}.jpg?apikey=' + encodeURIComponent(im.nearmapKey), o: { maxNativeZoom: 21, attribution: 'Imagery © Nearmap' }, watch: true }, ROADS] };
+    if (im.metromapKey) BASEMAPS.metromap = { label: 'MetroMap (latest, high detail)', layers: [{ url: 'https://api-v3.metromap.com.au/tiles/xyz/' + encodeURIComponent(im.metromapLayer || 'Australia_latest') + '/{z}/{y}/{x}.png?key=' + encodeURIComponent(im.metromapKey), o: { maxNativeZoom: 22, attribution: 'Imagery © MetroMap (Aerometrex)' }, watch: true }, ROADS] };
+    BASEMAPS.clarity = { label: 'Satellite HD (Esri Clarity)', layers: [CLARITY, ROADS] };
+    BASEMAPS.world = { label: 'Satellite (Esri)', layers: [WORLD, ROADS] };
+    BASEMAPS.vic = { label: 'Vicmap aerial (VIC, licensed)', layers: [VIC, ROADS] };
+    BASEMAPS.street = { label: 'Street map', layers: [OSM] };
+    DEFAULT_BASE = BASEMAPS[im.default] ? im.default : BASEMAPS.nearmap ? 'nearmap' : BASEMAPS.metromap ? 'metromap' : 'world';
+  }
+  configure(null);
   var START = { lat: -38.33, lng: 145.03, zoom: 12 }; // Mornington Peninsula
   var LIVE = { color: '#ffd400', weight: 3, opacity: 1, dashArray: '8 6', interactive: false };
   var CASING = { color: '#000', weight: 6, opacity: 0.45, interactive: false };
@@ -79,7 +90,7 @@
     // basemaps
     var baseLayers = [], sel = container.querySelector('.basemap select');
     function setBase(key, auto) {
-      if (!BASEMAPS[key]) key = 'world';
+      if (!BASEMAPS[key]) key = DEFAULT_BASE;
       baseLayers.forEach(function (l) { map.removeLayer(l); }); baseLayers = [];
       BASEMAPS[key].layers.forEach(function (d, i) {
         var tl = L.tileLayer(d.url, Object.assign({ maxZoom: 22, keepBuffer: 4, crossOrigin: opts.print ? 'anonymous' : undefined }, d.o)).addTo(map);
@@ -91,10 +102,14 @@
     function watch(tl) {
       var ok = 0, bad = 0, done = false;
       tl.on('tileload', function () { ok++; });
-      tl.on('tileerror', function () { bad++; if (done || ok || bad < 6 || navigator.onLine === false) return; done = true; setBase('world', true); });
+      tl.on('tileerror', function () {
+        bad++; if (done || ok || bad < 6 || navigator.onLine === false) return; done = true;
+        App.toast('That imagery isn’t loading here (check the key or subscription), so Esri satellite is shown instead.', 'warn', 6000);
+        setBase('world', true);
+      });
     }
     var saved = null; try { saved = localStorage.getItem('seedsman-basemap'); } catch (e) { /* ignore */ }
-    setBase(opts.basemap || saved || 'world', true);
+    setBase(opts.basemap || (BASEMAPS[saved] ? saved : DEFAULT_BASE), true);
     if (sel) sel.onchange = function () { setBase(sel.value); };
 
     var shapes = L.layerGroup().addTo(map), props = L.layerGroup().addTo(map), live = L.layerGroup().addTo(map), pin = null;
@@ -403,5 +418,5 @@
     input.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
   }
 
-  window.GIS = { suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
+  window.GIS = { configure: configure, suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
 })();
