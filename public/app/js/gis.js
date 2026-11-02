@@ -10,8 +10,8 @@
   var WORLD = { url: ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', o: { maxNativeZoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' } };
   var OSM = { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', o: { maxNativeZoom: 19, attribution: '© OpenStreetMap contributors' } };
   var BASEMAPS = {
-    vic: { label: 'Satellite (Vicmap)', layers: [VIC, ROADS] },
-    world: { label: 'Satellite (World)', layers: [WORLD, ROADS] },
+    world: { label: 'Satellite', layers: [WORLD, ROADS] },
+    vic: { label: 'Satellite (Vicmap, VIC only)', layers: [VIC, ROADS] },
     street: { label: 'Street map', layers: [OSM] }
   };
   var START = { lat: -38.33, lng: 145.03, zoom: 12 }; // Mornington Peninsula
@@ -79,7 +79,7 @@
     // basemaps
     var baseLayers = [], sel = container.querySelector('.basemap select');
     function setBase(key, auto) {
-      if (!BASEMAPS[key]) key = 'vic';
+      if (!BASEMAPS[key]) key = 'world';
       baseLayers.forEach(function (l) { map.removeLayer(l); }); baseLayers = [];
       BASEMAPS[key].layers.forEach(function (d, i) {
         var tl = L.tileLayer(d.url, Object.assign({ maxZoom: 22, keepBuffer: 4, crossOrigin: opts.print ? 'anonymous' : undefined }, d.o)).addTo(map);
@@ -94,7 +94,7 @@
       tl.on('tileerror', function () { bad++; if (done || ok || bad < 6 || navigator.onLine === false) return; done = true; setBase('world', true); });
     }
     var saved = null; try { saved = localStorage.getItem('seedsman-basemap'); } catch (e) { /* ignore */ }
-    setBase(opts.basemap || saved || 'vic', true);
+    setBase(opts.basemap || saved || 'world', true);
     if (sel) sel.onchange = function () { setBase(sel.value); };
 
     var shapes = L.layerGroup().addTo(map), props = L.layerGroup().addTo(map), live = L.layerGroup().addTo(map), pin = null;
@@ -320,5 +320,78 @@
     return g;
   }
 
-  window.GIS = { create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
+  // ---------------- address suggestions and road distance ----------------
+  var AU = '112,-44,154,-10';
+  function placeFromPhoton(f) {
+    var p = f.properties || {}, c = f.geometry.coordinates;
+    var street = [p.housenumber, p.street || (p.housenumber ? '' : p.name)].filter(Boolean).join(' ') || p.name || '';
+    var suburb = p.district || p.locality || p.city || p.county || '';
+    return { label: [street, suburb, p.state, p.postcode].filter(Boolean).join(', '), address: street, suburb: suburb, state: p.state || '', postcode: p.postcode || '', lat: c[1], lng: c[0] };
+  }
+  /** Suggestions while typing (Photon, made for search-as-you-type over OpenStreetMap), biased towards `near`. */
+  function suggest(q, near) {
+    var url = 'https://photon.komoot.io/api/?limit=6&lang=en&bbox=' + AU + '&q=' + encodeURIComponent(q) + (near ? '&lat=' + near.lat.toFixed(4) + '&lon=' + near.lng.toFixed(4) : '');
+    return fetch(url).then(function (r) { if (!r.ok) throw new Error('suggest'); return r.json(); }).then(function (d) {
+      var seen = {};
+      return (d.features || []).filter(function (f) { return (f.properties || {}).countrycode === 'AU' || !(f.properties || {}).countrycode; }).map(placeFromPhoton)
+        .filter(function (p) { if (!p.address || seen[p.label]) return false; seen[p.label] = 1; return true; });
+    });
+  }
+  function straightKm(a, b) {
+    var D = Math.PI / 180, dLat = (b.lat - a.lat) * D, dLng = (b.lng - a.lng) * D;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a.lat * D) * Math.cos(b.lat * D) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  /** One-way driving distance and time: by road (OSRM) when it answers, otherwise straight line × 1.35 at 50 km/h. */
+  function drive(a, b) {
+    var est = function () { var km = straightKm(a, b) * 1.35; return { km: km, min: km / 50 * 60, road: false }; };
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=false';
+    var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 6000); });
+    return Promise.race([fetch(url).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }), timeout]).then(function (d) {
+      var rt = d && d.routes && d.routes[0];
+      return rt ? { km: rt.distance / 1000, min: rt.duration / 60, road: true } : est();
+    });
+  }
+  /** Turn a text input into an address field with suggestions. opts: {near(): {lat,lng}, onPick(place)} */
+  function addressInput(input, opts) {
+    var box = document.createElement('div'); box.className = 'addr-suggest panel'; box.hidden = true;
+    input.parentNode.style.position = 'relative'; input.parentNode.appendChild(box);
+    input.setAttribute('autocomplete', 'off');
+    var list = [], active = -1, t = null, seq = 0;
+    function show(items, note) {
+      list = items; active = -1;
+      box.innerHTML = items.map(function (p, i) { return '<button type="button" data-i="' + i + '">' + App.icon('pin') + '<span><b>' + esc(p.address) + '</b><small>' + esc([p.suburb, p.state, p.postcode].filter(Boolean).join(' ')) + '</small></span></button>'; }).join('') + (note ? '<p>' + note + '</p>' : '');
+      box.hidden = !items.length && !note;
+    }
+    function pick(p) { box.hidden = true; input.value = p.address; if (opts.onPick) opts.onPick(p); }
+    function fallback(q) { // full search (allowed for single searches) when suggestions are unavailable
+      return search(q, { getBounds: function () { var n = (opts.near && opts.near()) || START; return L.latLngBounds([n.lat - 1, n.lng - 1], [n.lat + 1, n.lng + 1]); } });
+    }
+    input.addEventListener('input', function () {
+      clearTimeout(t);
+      var q = input.value.trim(); if (q.length < 3) { box.hidden = true; return; }
+      var my = ++seq;
+      t = setTimeout(function () {
+        suggest(q, opts.near && opts.near()).then(function (items) { if (my === seq) show(items, items.length ? '' : 'No match yet — keep typing, or press Enter to search.'); })
+          .catch(function () { if (my === seq) show([], 'Press Enter to search for this address.'); });
+      }, 280);
+    });
+    input.addEventListener('keydown', function (e) {
+      var btns = box.querySelectorAll('button');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (!btns.length) return; e.preventDefault(); active = (active + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length; btns.forEach(function (b, i) { b.classList.toggle('on', i === active); }); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (active >= 0 && list[active]) { pick(list[active]); return; }
+        if (list.length) { pick(list[0]); return; }
+        var q = input.value.trim(); if (!q) return;
+        show([], 'Searching…');
+        fallback(q).then(function (r) { r = r.map(function (p) { return Object.assign(p, { address: p.address }); }); show(r, r.length ? '' : 'Address not found. Check the spelling, or place the pin on the map.'); }).catch(function () { show([], 'Search is not available right now.'); });
+      } else if (e.key === 'Escape') box.hidden = true;
+    });
+    box.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    box.addEventListener('click', function (e) { var b = e.target.closest('[data-i]'); if (b) pick(list[+b.getAttribute('data-i')]); });
+    input.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
+  }
+
+  window.GIS = { suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
 })();

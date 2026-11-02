@@ -38,12 +38,12 @@
       { upTo: 8.0, label: 'Extra tall', productivity: 11 }
     ],
     topFactor: 1.2,
-    conditions: [
-      { id: 'maintained', label: 'Maintained (regular trim)', time: 1.0, waste: 1.0 },
-      { id: 'overgrown', label: 'Overgrown (6–12 months)', time: 1.5, waste: 2.5 },
-      { id: 'reduction', label: 'Hard cut / reduction', time: 2.5, waste: 5.0 }
+    conditions: [            // time multiplier and how much is usually cut off each face (m)
+      { id: 'maintained', label: 'Maintained (regular trim)', time: 1.0, cutBack: 0.05 },
+      { id: 'overgrown', label: 'Overgrown (6–12 months)', time: 1.5, cutBack: 0.15 },
+      { id: 'reduction', label: 'Hard cut / reduction', time: 2.5, cutBack: 0.4 }
     ],
-    hedgeWastePerM2: 0.02,
+    looseFactor: 0.6,        // m³ of loose green waste per m³ of hedge cut off (foliage is mostly air, clippings pack)
     picker: { fromHeight: 3.0, halfDay: 320, fullDay: 480, delivery: 150, halfDayHours: 4 },
     waste: { rate: 65, loadMinutesPerM3: 10 },
     equipment: 25,           // per job
@@ -76,7 +76,7 @@
       else out[k] = r[k];
     });
     if (r.labourCost == null && r.labourRate != null) out.labourCost = r2(num(r.labourRate) / (1 + out.markup)); // older cards held the selling rate
-    if (r.hedgeWastePerM2 == null && r.waste && r.waste.m3PerM2 != null) out.hedgeWastePerM2 = r.waste.m3PerM2;
+    out.conditions.forEach(function (c) { if (c.cutBack == null) c.cutBack = Math.round(0.05 * (c.waste || 1) * 100) / 100; }); // older cards had a waste multiplier
     if (r.wasteRate != null && (!r.waste || r.waste.rate == null)) out.waste.rate = r.wasteRate;
     if (r.version) out.version = r.version;
     if (r.approval) out.approval = r.approval;
@@ -114,7 +114,8 @@
       var eff = a.front + a.back + a.lhs + a.rhs + a.top * card.topFactor;
       r.areas = a; r.qty = area; r.unit = 'm²'; r.tier = t.label; r.productivity = t.productivity; r.condition = c.label;
       r.hours = t.productivity > 0 ? eff / t.productivity * c.time : 0;
-      r.waste = area * card.hedgeWastePerM2 * c.waste;
+      r.cutBack = i.cutBack != null && i.cutBack !== '' ? num(i.cutBack) / 100 : num(c.cutBack, 0.05); // inputs hold centimetres
+      r.waste = area * r.cutBack * card.looseFactor;
       r.picker = num(i.height) > card.picker.fromHeight;
       r.equipment = 0;
       r.detail = t.label + ' · ' + t.productivity + ' m²/h' + (c.time !== 1 ? ' · ' + c.label : '');

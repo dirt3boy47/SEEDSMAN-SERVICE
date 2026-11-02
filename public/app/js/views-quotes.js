@@ -59,7 +59,7 @@
         onSearchPick: function (p) { if (!S.propertyId) { if (!S.property.address) S.property.address = p.address; if (!S.property.suburb) S.property.suburb = p.suburb; } setHouse(L.latLng(p.lat, p.lng)); dirty(); renderSheet(); }
       });
       if (quoteId) return App.get('quotes/' + encodeURIComponent(quoteId)).then(loadQuote);
-      if (ctx.query.property) return App.get('properties/' + encodeURIComponent(ctx.query.property)).then(function (d) { useCustomer(d.customer); useProperty(d.property, d.drawings); render(); gis.fit(); });
+      if (ctx.query.property) return App.get('properties/' + encodeURIComponent(ctx.query.property)).then(function (d) { useCustomer(d.customer); useProperty(d.property, d.drawings); render(); gis.fit(); workOutTravel(true); });
       if (ctx.query.customer) return pickCustomer(ctx.query.customer);
       var d = loadDraft();
       render();
@@ -89,14 +89,14 @@
     }
     function setHouse(ll) {
       if (ll) { S.property.lat = ll.lat; S.property.lng = ll.lng; }
-      gis.setPin(ll, { draggable: true, title: 'House — drag to move', onMove: function (x) { S.property.lat = x.lat; S.property.lng = x.lng; dirty(); } });
+      gis.setPin(ll, { draggable: true, title: 'House — drag to move', onMove: function (x) { S.property.lat = x.lat; S.property.lng = x.lng; dirty(); if (S.options.travelAuto !== false) workOutTravel(true); } });
     }
     function pickCustomer(id) {
       return App.get('customers/' + encodeURIComponent(id)).then(function (d) {
         useCustomer(d.customer); S.properties = d.properties;
         var p = d.properties[0];
         if (!p) { useProperty(null); dirty(); render(); return; }
-        return App.get('properties/' + encodeURIComponent(p.id)).then(function (pd) { useProperty(pd.property, pd.drawings); dirty(); render(); gis.fit(); });
+        return App.get('properties/' + encodeURIComponent(p.id)).then(function (pd) { useProperty(pd.property, pd.drawings); dirty(); render(); gis.fit(); if (!S.id) workOutTravel(true); });
       }).catch(function (e) { App.toast(e.message, 'err'); });
     }
 
@@ -153,6 +153,39 @@
     function renderSheet() {
       var sheet = el.querySelector('#sheet'), t = S.items.length ? calc() : null;
       sheet.innerHTML = customerCard() + itemsCard(t) + jobCard() + summaryCard(t) + notesCard();
+      wireSheet(); showTravel();
+    }
+    function wireSheet() {
+      var a = el.querySelector('#p-address');
+      if (a) GIS.addressInput(a, { near: function () { return biz.depot || gis.map.getCenter(); }, onPick: function (pl) {
+        S.property.address = pl.address; S.property.suburb = pl.suburb;
+        var sb = el.querySelector('#p-suburb'); if (sb) sb.value = pl.suburb;
+        setHouse(L.latLng(pl.lat, pl.lng)); gis.map.setView([pl.lat, pl.lng], 20);
+        S.options.travelAuto = true; dirty(); renderTop(); workOutTravel();
+        if (narrow()) App.toast('Found it — the map is on the property.');
+      } });
+    }
+    /** Return trip from the home base to the property (by road when the routing service answers). */
+    function workOutTravel(quiet) {
+      var box = el.querySelector('#travel-hint');
+      if (!biz.depot) { if (box) box.innerHTML = 'Set your <a href="#/settings">home base</a> to work this out automatically.'; return; }
+      if (S.property.lat == null) { if (box) box.textContent = 'Place the house pin to work out travel.'; return; }
+      if (box) box.textContent = 'Working out the drive…';
+      GIS.drive(biz.depot, { lat: S.property.lat, lng: S.property.lng }).then(function (r) {
+        if (!el.isConnected) return;
+        S.travelInfo = r;
+        S.options.travelKm = Math.round(r.km * 2); S.options.travelAuto = true;
+        var f = el.querySelector('[data-o=travelKm]'); if (f) f.value = S.options.travelKm;
+        showTravel();
+        dirty(); S.items.forEach(function (x) { refreshNumbers(x.id); }); if (!S.items.length) renderTop();
+        if (!quiet) App.toast('Travel: ' + S.options.travelKm + ' km return from your home base' + (r.road ? '' : ' (estimated)') + '.');
+      });
+    }
+    function showTravel() {
+      var box = el.querySelector('#travel-hint'), r = S.travelInfo; if (!box) return;
+      if (r) box.textContent = r.km.toFixed(1) + ' km each way · about ' + Math.round(r.min) + ' min' + (r.road ? ' by road' : ' (estimate: straight line × 1.35)') + ' from home base';
+      else if (biz.depot) box.innerHTML = '<button type="button" class="link" id="travel-calc" style="padding:0">Work out from home base</button>';
+      else box.innerHTML = 'Set your <a href="#/settings">home base</a> to work this out automatically.';
     }
     function customerCard() {
       if (S.customerId) {
@@ -198,6 +231,9 @@
         h += '<div class="grid3"><label class="field">Length (m)<input data-i="length" type="number" inputmode="decimal" min="0" step="0.1" value="' + num(i.length) + '"></label>' +
           '<label class="field">Height (m)<input data-i="height" type="number" inputmode="decimal" min="0" step="0.1" value="' + num(i.height) + '"></label>' +
           '<label class="field">Depth (m)<input data-i="depth" type="number" inputmode="decimal" min="0" step="0.1" value="' + num(i.depth) + '"></label></div>';
+        var cond = rates.conditions.filter(function (c) { return c.id === (i.condition || 'maintained'); })[0] || rates.conditions[0];
+        h += '<div class="grid3"><label class="field">Cut back (cm)<input data-i="cutBack" type="number" inputmode="decimal" min="0" step="1" placeholder="' + Math.round(cond.cutBack * 100) + '" value="' + num(i.cutBack) + '"></label>' +
+          '<div class="field span2">Green waste<div class="waste-out" data-waste>' + wasteText(l) + '</div></div></div>';
         h += '<div><div class="field" style="margin-bottom:6px">Faces to cut</div><div class="faces">' + P.FACES.map(function (f) { return '<label class="chip"><input type="checkbox" data-face="' + f.id + '"' + (i.faces && i.faces[f.id] ? ' checked' : '') + '>' + f.label + ' <span class="muted num" data-fa="' + f.id + '">' + (l.areas && l.areas[f.id] ? l.areas[f.id].toFixed(1) + ' m²' : '') + '</span></label>'; }).join('') + '</div></div>';
       } else {
         var lbl = s.method === 'hours' ? 'Hours' : s.method === 'unit' ? 'Quantity (each)' : 'Quantity (' + s.unit + ')';
@@ -208,6 +244,10 @@
         '<label class="field">Description on the quote<input data-f="description" value="' + esc(it.description || s.description || '') + '"></label></div>';
       h += '<div class="row"><span class="spacer"></span><button class="link" data-act="dup">' + 'Duplicate</button><button class="link danger" data-act="del">Remove</button></div>';
       return h;
+    }
+    function wasteText(l) {
+      if (l.method !== 'hedge') return '';
+      return '<b class="num">' + (l.waste || 0).toFixed(2) + ' m³</b> <span class="muted small">' + (l.qty || 0).toFixed(1) + ' m² × ' + Math.round((l.cutBack || 0) * 100) + ' cm cut × ' + rates.looseFactor + ' loose</span>';
     }
     function breakdownRows(l) {
       var rows = [];
@@ -222,7 +262,7 @@
       var mk = S.options.markup != null && S.options.markup !== '' ? Math.round(S.options.markup * 100) : '';
       return '<div class="card"><div class="card-h"><h2>Job</h2></div><div class="card-b grid2">' +
         '<label class="check span2"><input type="checkbox" data-o="removeWaste"' + (S.options.removeWaste ? ' checked' : '') + '> Take the green waste away</label>' +
-        '<label class="field">Travel, return (km)<input data-o="travelKm" type="number" min="0" step="1" inputmode="numeric" value="' + num(S.options.travelKm) + '"></label>' +
+        '<label class="field">Travel, return (km)<input data-o="travelKm" type="number" min="0" step="1" inputmode="numeric" value="' + num(S.options.travelKm) + '"><span class="travel-hint" id="travel-hint"></span></label>' +
         '<label class="field">Setup (crew hours)<input data-o="setupHours" type="number" min="0" step="0.25" placeholder="' + rates.setupHours + '" value="' + num(S.options.setupHours) + '"></label>' +
         '<label class="field">Markup on cost (%)<input data-o="markup" type="number" min="0" step="1" placeholder="' + Math.round(rates.markup * 100) + '" value="' + mk + '"></label>' +
         '<label class="field">Crew<input disabled value="' + rates.crew + ' people"></label></div></div>';
@@ -259,6 +299,8 @@
         var bd = card.querySelector('[data-bd]'); if (bd) bd.innerHTML = breakdownRows(l);
         P.FACES.forEach(function (f) { var x = card.querySelector('[data-fa="' + f.id + '"]'); if (x) x.textContent = l.areas && l.areas[f.id] ? l.areas[f.id].toFixed(1) + ' m²' : ''; });
         var po = card.querySelector('[data-f=priceOverride]'); if (po) po.placeholder = l.sellCalc.toFixed(2);
+        var wo = card.querySelector('[data-waste]'); if (wo) wo.innerHTML = wasteText(l);
+        var cb = card.querySelector('[data-i=cutBack]'); if (cb && l.cutBack != null && it.inputs.cutBack == null) cb.placeholder = Math.round(l.cutBack * 100);
       });
       var sc = sheet.querySelector('#sum');
       if (sc && S.items.length) { var tmp = document.createElement('div'); tmp.innerHTML = summaryCard(t); sc.replaceWith(tmp.firstChild); }
@@ -279,6 +321,7 @@
       if (tg.hasAttribute('data-n')) { S[tg.getAttribute('data-n')] = tg.value; dirty(); return; }
       if (tg.hasAttribute('data-o')) {
         var k = tg.getAttribute('data-o');
+        if (k === 'travelKm') { S.options.travelAuto = false; S.travelInfo = null; var th = el.querySelector('#travel-hint'); if (th) th.innerHTML = '<button type="button" class="link" id="travel-calc" style="padding:0">Work out from home base</button>'; }
         S.options[k] = k === 'removeWaste' ? tg.checked : tg.value === '' ? null : k === 'markup' ? (parseFloat(tg.value) || 0) / 100 : parseFloat(tg.value) || 0;
         dirty(); S.items.forEach(function (x) { refreshNumbers(x.id); }); if (!S.items.length) renderTop(); return;
       }
@@ -295,6 +338,7 @@
       var tg = e.target;
       if (tg.closest('#add-svc')) { addServiceMenu(tg.closest('#add-svc')); return; }
       if (tg.closest('#cust-change')) { S.customerId = null; S.propertyId = null; S.drawings = []; S.properties = []; renderSheet(); renderMap(); return; }
+      if (tg.closest('#travel-calc')) { workOutTravel(); return; }
       if (tg.closest('#pin-centre')) { setHouse(gis.map.getCenter()); dirty(); App.toast('House pin placed at the map centre. Drag it onto the house.'); return; }
       var cr = tg.closest('[data-cust]'); if (cr) { el.querySelector('#cust-res').hidden = true; pickCustomer(cr.getAttribute('data-cust')); return; }
       var a = tg.closest('[data-act]'); if (!a) return;
@@ -405,38 +449,37 @@
 
   // ======================= customer-facing document =======================
   App.route('/quotes/:id/document', 'quotes', function (ctx) {
-    var gis;
-    ctx.onLeave(function () { if (gis) gis.destroy(); });
+    var view = null, pdfP = null, link = null;
+    ctx.onLeave(function () { if (view) view.gis.destroy(); });
     App.setTop({ back: '#/quotes/' + ctx.params[0], title: 'Quote document', sub: 'Loading…' });
-    Promise.all([App.me(), App.get('quotes/' + encodeURIComponent(ctx.params[0]))]).then(function (r) {
+    Promise.all([App.me(), App.get('quotes/' + encodeURIComponent(ctx.params[0])), App.get('quotes/' + encodeURIComponent(ctx.params[0]) + '/link').catch(function () { return {}; })]).then(function (r) {
       if (!ctx.el.isConnected) return;
-      var me = r[0], d = r[1], q = d.quote, c = q.calculation, b = me.business || {}, cu = d.customer, p = d.property;
-      var name = b.tradingName || b.name || 'Seedsman';
-      if (!ctx.el.isConnected) return;
-      App.setTop({ el: ctx.el, back: '#/quotes/' + q.id, title: 'Quote ' + q.number, sub: 'Customer document · ' + cu.name,
-        actions: '<button class="btn" id="mail">' + icon('mail') + '<span class="lbl">Email</span></button><button class="btn primary" id="pdf">' + icon('print') + '<span class="lbl">Save PDF / Print</span></button>' });
-      var lines = c.document || (c.lines || []).map(function (l, i) { return { title: (q.items[i] && q.items[i].name) || l.serviceName || 'Hedge trimming', description: '', qty: l.qty || l.area, unit: l.unit || 'm²', amount: l.sell || 0 }; });
-      ctx.el.innerHTML = '<div class="doc-wrap"><article class="doc">' +
-        '<header class="doc-head"><div class="doc-brand"><span class="brand-mark">' + icon('leaf') + '</span><div><b>' + esc(name) + '</b><small>' + esc([b.phone, b.email].filter(Boolean).join(' · ')) + '</small>' + (b.abn ? '<small>ABN ' + esc(b.abn) + '</small>' : '') + (b.address ? '<small>' + esc(b.address) + '</small>' : '') + '</div></div>' +
-        '<div class="doc-title"><h1>QUOTATION</h1><div><b>' + esc(q.number) + '</b>' + (q.revision > 1 ? ' · revision ' + q.revision : '') + '</div><div>Date: ' + App.date(q.updated_at) + '</div><div>Valid until: ' + App.date(q.valid_until) + '</div></div></header>' +
-        '<section class="doc-meta"><div><h4>Prepared for</h4><b>' + esc(cu.name) + '</b><div>' + esc([cu.phone, cu.email].filter(Boolean).join(' · ')) + '</div></div><div><h4>Site</h4><b>' + esc(p.address) + '</b><div>' + esc(p.suburb) + '</div></div></section>' +
-        '<div class="doc-map"><div id="docmap"></div></div>' +
-        '<table><thead><tr><th>Description</th><th class="r">Quantity</th><th class="r">Amount</th></tr></thead><tbody>' +
-        lines.map(function (l) { return '<tr><td><b>' + esc(l.title) + '</b>' + (l.description ? '<small>' + esc(l.description) + '</small>' : '') + '</td><td class="r">' + (l.qty != null ? esc(App.qty(l.qty, l.unit)) : '') + '</td><td class="r">' + money(l.amount) + '</td></tr>'; }).join('') +
-        '</tbody></table><div class="doc-totals"><div><span>Subtotal (excl. GST)</span><span class="num">' + money(c.exGst) + '</span></div><div><span>GST</span><span class="num">' + money(c.gst) + '</span></div><div class="grand"><span>Total (incl. GST)</span><span class="num">' + money(c.total) + '</span></div></div>' +
-        '<section class="doc-notes">' + [['Notes', q.notes], ['Assumptions', q.assumptions], ['Exclusions', q.exclusions], ['Terms', b.terms || 'This quote is valid until the date shown. Sizes were measured from aerial imagery and are confirmed on site; we will discuss any change in price before starting.'], ['Payment', b.paymentTerms || 'Payment due within 7 days of completion.']]
-          .filter(function (x) { return x[1]; }).map(function (x) { return '<div><h4>' + x[0] + '</h4><p>' + esc(x[1]) + '</p></div>'; }).join('') + '</section>' +
-        '<section class="doc-accept"><div>Accepted by (name)</div><div>Signature</div><div>Date</div></section>' +
-        '<footer class="doc-foot">' + esc(name) + ' · ' + esc(q.number) + ' · Thank you for the opportunity to quote.</footer></article></div>';
-      gis = GIS.create(ctx.el.querySelector('#docmap'), { toolbar: false, interactive: false, basemap: 'vic', print: true, start: p.lat != null ? { lat: p.lat, lng: p.lng, zoom: 19 } : null });
-      gis.setShapes(q.items.filter(function (it) { return it.geometry; }).map(function (it) { var s = P.serviceOf(me.rates, it.service) || {}; return { geometry: it.geometry, color: App.cat(s.category).map, label: it.name }; }));
-      if (p.lat != null) gis.setPin(L.latLng(p.lat, p.lng));
-      if (!gis.fit()) ctx.el.querySelector('.doc-map').hidden = true;
-      document.getElementById('pdf').onclick = function () { window.print(); };
+      var me = r[0], d = r[1], q = d.quote, b = me.business || {}, cu = d.customer, p = d.property;
+      link = r[2].url || null;
+      var filename = (b.tradingName || 'Quote').replace(/[^\w\- ]+/g, '').trim() + ' ' + q.number + '.pdf';
+      App.setTop({ el: ctx.el, back: '#/quotes/' + q.id, title: 'Quote ' + q.number, sub: 'Customer document · ' + cu.name + (cu.email ? ' · ' + cu.email : ''),
+        actions: '<button class="btn" id="link" title="Copy the customer’s link">' + icon('copy') + '<span class="lbl">Customer link</span></button><button class="btn" id="dl">' + icon('print') + '<span class="lbl">Download PDF</span></button><button class="btn primary" id="mail">' + icon('mail') + '<span class="lbl">Email with PDF</span></button>' });
+      view = Doc.render(ctx.el, { business: b, customer: cu, property: p, quote: q, acceptance: d.acceptance, colorOf: function (it) { return App.cat((P.serviceOf(me.rates, it.service) || {}).category).map; } });
+      // make the PDF in the background once the map has drawn, so Email can attach it straight away (phones only allow sharing right after a tap)
+      setTimeout(function () { if (ctx.el.isConnected) pdfP = Doc.pdf(view.el).catch(function () { return null; }); }, 1800);
+      function getPdf() { return pdfP || (pdfP = Doc.pdf(view.el).catch(function () { return null; })); }
+      document.getElementById('dl').onclick = function () { App.toast('Making the PDF…'); getPdf().then(function (blob) { if (blob) Doc.download(blob, filename); else window.print(); }); };
+      document.getElementById('link').onclick = function () {
+        if (!link) return App.toast('The customer link is not available.', 'err');
+        (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { App.toast('Link copied — the customer can view, download and accept the quote there.'); }, function () { prompt('Customer link:', link); });
+      };
       document.getElementById('mail').onclick = function () {
-        var body = 'Hi ' + cu.name.split(' ')[0] + ',\n\nPlease find our quote ' + q.number + ' for ' + p.address + ' attached.\nTotal: ' + money(c.total) + ' incl. GST (valid until ' + App.date(q.valid_until) + ').\n\nKind regards,\n' + name + (b.phone ? '\n' + b.phone : '');
-        location.href = 'mailto:' + encodeURIComponent(cu.email || '') + '?subject=' + encodeURIComponent(name + ' — quote ' + q.number) + (b.email ? '&cc=' + encodeURIComponent(b.email) : '') + '&body=' + encodeURIComponent(body);
-        App.toast('Save the PDF first, then attach it to the email.', 'warn', 6000);
+        var first = (cu.name || '').split(' ')[0] || 'there', name = view.name;
+        var body = 'Hi ' + first + ',\n\nThank you for the opportunity to quote. Please find our quote ' + q.number + ' for ' + [p.address, p.suburb].filter(Boolean).join(', ') + ' attached.\n\n' +
+          'Total: ' + money(q.calculation.total) + ' incl. GST (valid until ' + App.date(q.valid_until) + ').\n' +
+          (link ? '\nYou can also view the quote and accept it online here:\n' + link + '\n' : '') + '\nKind regards,\n' + name + (b.phone ? '\n' + b.phone : '');
+        var go = function (blob) {
+          Doc.email({ blob: blob, filename: filename, to: cu.email, cc: b.email && b.email !== cu.email ? b.email : '', subject: name + ' — quote ' + q.number, body: body }).then(function (how) {
+            if (how === 'downloaded') App.toast('The PDF has downloaded — drag it from Downloads into the email. The email also has the customer’s link to the quote.', 'warn', 9000);
+            if (how === 'shared' && q.status === 'Draft') App.put('quotes/' + q.id + '/status', { status: 'Sent' }).then(function () { App.toast('Marked Sent.'); });
+          });
+        };
+        if (pdfP) pdfP.then(go); else { App.toast('Making the PDF…'); getPdf().then(go); }
       };
     }).catch(function (e) { App.toast(e.message, 'err'); });
   });

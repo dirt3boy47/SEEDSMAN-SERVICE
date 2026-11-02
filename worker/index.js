@@ -109,6 +109,8 @@ async function api(request, env, url) {
     return json({ token: await newSession(env, request, u.id), user: publicUser(u) });
   }
 
+  if (parts[0] === 'public') return publicApi(request, env, parts, url, m, body);
+
   const me = await userOf(request, env);
   if (!me) fail(401, 'Please sign in.');
   const id = parts[1];
@@ -153,6 +155,7 @@ async function saveBusiness(env, me, body) {
   ['terms', 'paymentTerms'].forEach((k) => { if (body[k] != null) cur[k] = str(body[k], 4000); });
   if (body.quoteValidityDays != null) cur.quoteValidityDays = Math.max(1, Math.min(365, parseInt(body.quoteValidityDays, 10) || 30));
   if (body.mapStart && isFinite(body.mapStart.lat) && isFinite(body.mapStart.lng)) cur.mapStart = { lat: +body.mapStart.lat, lng: +body.mapStart.lng, zoom: +body.mapStart.zoom || 15 };
+  if (body.depot && isFinite(body.depot.lat) && isFinite(body.depot.lng)) cur.depot = { lat: +body.depot.lat, lng: +body.depot.lng, address: str(body.depot.address, 200) };
   await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('business', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(cur)).run();
   await audit(env, me, 'business', 'business', 'update', cur);
   return json({ business: cur });
@@ -414,7 +417,8 @@ async function quoteOut(env, q) {
   const p = await env.DB.prepare('SELECT * FROM properties WHERE id = ?').bind(q.property_id).first();
   const job = await env.DB.prepare("SELECT * FROM jobs WHERE quote_id = ? AND status != 'Cancelled'").bind(q.id).first();
   const items = parseJson(q.hedges, []).map((x) => Object.assign(Pricing.normaliseItem(x), { measure: x.measure || null }));
-  return { quote: Object.assign({}, q, { items, hedges: undefined, calculation: parseJson(q.calculation, {}) }), customer: c, property: p, job, drawings: p ? await drawingsOf(env, p.id) : [] };
+  const acceptance = await env.DB.prepare('SELECT name, accepted_at, revision FROM quote_acceptances WHERE quote_id = ?').bind(q.id).first();
+  return { quote: Object.assign({}, q, { items, hedges: undefined, calculation: parseJson(q.calculation, {}) }), customer: c, property: p, job, acceptance, drawings: p ? await drawingsOf(env, p.id) : [] };
 }
 
 async function quotesApi(env, me, m, parts, url, body) {
@@ -437,6 +441,7 @@ async function quotesApi(env, me, m, parts, url, body) {
     await audit(env, me, 'quote', qid, 'status', { status: body.status });
     return json({ ok: true });
   }
+  if (parts[2] === 'link' && m === 'GET') return json({ url: url.origin + '/quote.html#' + q.id + '.' + (await quoteToken(env, q.id)) });
   if (parts[2] === 'revisions' && m === 'GET') {
     return json({ revisions: (await env.DB.prepare("SELECT r.revision, r.created_at, u.name AS by_name, json_extract(r.snapshot, '$.calculation.total') AS total FROM quote_revisions r LEFT JOIN user u ON u.id = r.created_by WHERE r.quote_id = ? ORDER BY r.revision DESC").bind(qid).all()).results });
   }
@@ -633,4 +638,60 @@ async function applySchedule(env, me, body) {
   await env.DB.batch(park.concat(place));
   await audit(env, me, 'schedule', 'apply', 'update', { jobs: list.length, created });
   return json({ ok: true, created });
+}
+
+// ---------------- the customer's own quote page (/quote.html#<quote id>.<token>) ----------------
+// The token is an HMAC of the quote id with a secret kept in business_settings, so links can't be guessed and
+// need no storage. Making a new secret (delete the 'portal' row) stops every link sent so far.
+async function portalKey(env) {
+  let row = await env.DB.prepare("SELECT value FROM business_settings WHERE id = 'portal'").first();
+  if (!row) {
+    await env.DB.prepare("INSERT OR IGNORE INTO business_settings (id, value) VALUES ('portal', ?)").bind(JSON.stringify({ secret: randHex(32) })).run();
+    row = await env.DB.prepare("SELECT value FROM business_settings WHERE id = 'portal'").first();
+  }
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(parseJson(row.value, {}).secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
+async function quoteToken(env, qid) { return hexOf(await crypto.subtle.sign('HMAC', await portalKey(env), new TextEncoder().encode('quote:' + qid))).slice(0, 40); }
+async function quoteFromRef(env, ref) {
+  const m = /^(quo_[0-9a-f]{20})\.([0-9a-f]{40})$/.exec(String(ref || ''));
+  if (!m) fail(404, 'This quote link is not right. Ask us to send it again.');
+  const want = await quoteToken(env, m[1]);
+  let d = 0; for (let i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ m[2].charCodeAt(i);
+  if (d) fail(404, 'This quote link is not right. Ask us to send it again.');
+  const q = await env.DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(m[1]).first();
+  if (!q) fail(404, 'This quote is no longer available.');
+  return q;
+}
+async function publicApi(request, env, parts, url, m, body) {
+  if (parts[1] !== 'quote') fail(404, 'Not found.');
+  if (!parts[2] && m === 'GET') {
+    const q = await quoteFromRef(env, url.searchParams.get('ref'));
+    const out = await quoteOut(env, q), b = await business(env), rates = await activeRates(env);
+    const pub = {}; ['name', 'tradingName', 'phone', 'email', 'abn', 'address', 'website', 'terms', 'paymentTerms'].forEach((k) => { if (b[k]) pub[k] = b[k]; });
+    const qq = out.quote;
+    return json({
+      business: pub, customer: { name: out.customer.name, email: out.customer.email, phone: out.customer.phone },
+      property: { address: out.property.address, suburb: out.property.suburb, lat: out.property.lat, lng: out.property.lng },
+      quote: { number: qq.number, revision: qq.revision, status: qq.status, updated_at: qq.updated_at, valid_until: qq.valid_until, notes: qq.notes, assumptions: qq.assumptions, exclusions: qq.exclusions,
+        items: qq.items.map((it) => ({ name: it.name, geometry: it.geometry, category: (Pricing.serviceOf(rates, it.service) || {}).category || 'Other' })),
+        calculation: { document: qq.calculation.document, lines: qq.calculation.lines, exGst: qq.calculation.exGst, gst: qq.calculation.gst, total: qq.calculation.total } },
+      acceptance: out.acceptance
+    });
+  }
+  if (parts[2] === 'accept' && m === 'POST') {
+    const q = await quoteFromRef(env, body.ref), name = str(body.name, 120);
+    if (!name) fail(400, 'Type your name to accept the quote.');
+    if (q.status === 'Declined') fail(409, 'This quote was withdrawn. Please contact us for a new one.');
+    if (q.valid_until < new Date().toISOString().slice(0, 10)) fail(409, 'This quote has expired. Please contact us for an updated quote.');
+    const done = await env.DB.prepare('SELECT 1 AS x FROM quote_acceptances WHERE quote_id = ?').bind(q.id).first();
+    if (!done) {
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO quote_acceptances (id, quote_id, revision, name, terms_version) VALUES (?, ?, ?, ?, 'v1')").bind(newId('acc'), q.id, q.revision, name),
+        env.DB.prepare("UPDATE quotes SET status = 'Accepted', updated_at = datetime('now') WHERE id = ?").bind(q.id)
+      ]);
+      await audit(env, null, 'quote', q.id, 'accepted-online', { name, revision: q.revision, ip: ipOf(request) });
+    }
+    return json({ ok: true });
+  }
+  fail(404, 'Not found.');
 }

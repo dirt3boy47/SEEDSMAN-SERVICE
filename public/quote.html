@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f7a5f">
+<meta name="robots" content="noindex">
+<title>Your Quote</title>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<link rel="stylesheet" href="/app/css/app.css">
+<style>
+  .pub-top { position: sticky; top: 10px; z-index: 1000; display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; margin: 10px auto 14px; max-width: calc(210mm + 20px); }
+  .pub-top .grow { flex: 1; min-width: 0; }
+  .pub-top b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pub-top small { color: var(--muted); }
+  .pub-accept { max-width: 210mm; margin: 14px auto 40px; padding: 18px 20px; }
+  .pub-wrap { padding: 0 10px; }
+  @media print { .pub-top, .pub-accept { display: none !important; } }
+</style>
+</head>
+<body>
+<div class="pub-wrap">
+  <header class="panel pub-top"><span class="brand-mark" id="mark"></span><div class="grow"><b id="who">Your quote</b><small id="sub">Loading…</small></div><button class="btn" id="dl" disabled>Download PDF</button></header>
+  <div id="doc"></div>
+  <section class="card pub-accept" id="accept" hidden></section>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<script src="/vendor/leaflet.js"></script>
+<script src="/app/js/geo.js"></script>
+<script src="/app/js/core.js"></script>
+<script src="/app/js/gis.js"></script>
+<script src="/app/js/doc.js"></script>
+<script>
+(function () {
+  'use strict';
+  var ref = location.hash.replace(/^#/, ''), esc = App.esc, CAT = App.CATS, view = null, data = null, pdfP = null;
+  document.getElementById('mark').innerHTML = App.icon('leaf');
+  if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.setAttribute('data-theme', 'dark');
+  function api(method, path, body) {
+    return fetch('/api/public/' + path, { method: method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Something went wrong.'); return d; }); });
+  }
+  function load() {
+    api('GET', 'quote?ref=' + encodeURIComponent(ref)).then(function (d) {
+      data = d; var q = d.quote, b = d.business, name = b.tradingName || b.name || 'Your quote';
+      document.title = 'Quote ' + q.number + ' · ' + name;
+      document.getElementById('who').textContent = name + ' — quote ' + q.number;
+      document.getElementById('sub').textContent = App.money(q.calculation.total) + ' incl. GST · valid until ' + App.date(q.valid_until);
+      if (view) view.gis.destroy();
+      view = Doc.render(document.getElementById('doc'), { business: b, customer: d.customer, property: d.property, quote: q, acceptance: d.acceptance, colorOf: function (it) { return (CAT[it.category] || CAT.Other).map; } });
+      pdfP = null; setTimeout(function () { pdfP = Doc.pdf(view.el).catch(function () { return null; }); }, 1800);
+      var dl = document.getElementById('dl'); dl.disabled = false;
+      dl.onclick = function () { (pdfP || (pdfP = Doc.pdf(view.el))).then(function (blob) { if (blob) Doc.download(blob, name + ' ' + q.number + '.pdf'); else window.print(); }); };
+      var box = document.getElementById('accept'), expired = q.valid_until < new Date().toISOString().slice(0, 10);
+      box.hidden = false;
+      if (d.acceptance) box.innerHTML = '<h2>Thank you, ' + esc(d.acceptance.name.split(' ')[0]) + '</h2><p class="muted">You accepted this quote on ' + App.date(d.acceptance.accepted_at) + '. We will be in touch to book a day.' + (b.phone ? ' Questions? Call ' + esc(b.phone) + '.' : '') + '</p>';
+      else if (q.status === 'Declined') box.innerHTML = '<h2>This quote is no longer available</h2><p class="muted">Please contact us for an updated quote.</p>';
+      else if (expired) box.innerHTML = '<h2>This quote has expired</h2><p class="muted">Please contact us' + (b.phone ? ' on ' + esc(b.phone) : '') + ' for an updated quote.</p>';
+      else {
+        box.innerHTML = '<h2>Accept this quote</h2><p class="muted">Happy to go ahead? Accept online and we will contact you to book the work.</p><div class="grid2"><label class="field">Your name<input id="nm" autocomplete="name" value="' + esc(d.customer.name || '') + '"></label><span></span>' +
+          '<label class="check span2"><input type="checkbox" id="ok"> I accept quote ' + esc(q.number) + ' (' + App.money(q.calculation.total) + ' incl. GST) and its terms.</label></div><div class="row" style="margin-top:14px"><button class="btn primary" id="go" disabled>Accept quote</button></div>';
+        var ok = box.querySelector('#ok'), go = box.querySelector('#go');
+        ok.onchange = function () { go.disabled = !ok.checked; };
+        go.onclick = function () { go.disabled = true; api('POST', 'quote/accept', { ref: ref, name: box.querySelector('#nm').value }).then(function () { App.toast('Accepted — thank you!'); load(); }).catch(function (e) { App.toast(e.message, 'err', 6000); go.disabled = false; }); };
+      }
+    }).catch(function (e) { document.getElementById('sub').textContent = e.message; document.getElementById('doc').innerHTML = '<div class="card empty" style="max-width:520px;margin:40px auto"><b>' + esc(e.message) + '</b></div>'; });
+  }
+  load();
+})();
+</script>
+</body>
+</html>
