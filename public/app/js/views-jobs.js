@@ -98,7 +98,9 @@
 
     // answers
     var A = { arrived: j.start.slice(11, 16), arrivedOk: false, finished: j.end.slice(11, 16), finishedOk: false, men: null, breaks: null,
-      task: {}, cond: {}, extra: null, access: null, slow: [], waste: null, picker: null, photoSkip: false, notes: null, months: null, date: j.start.slice(0, 10), allDone: null, progress: null };
+      task: {}, cond: {}, extra: null, access: null, slow: [], waste: null, picker: null, photoSkip: false, notes: null, months: null, date: j.start.slice(0, 10), allDone: null, progress: null, items: {} };
+    var lastItems = null; earlier.slice().sort(function (a, b) { return a.start < b.start ? -1 : 1; }).forEach(function (x) { if (x.day_log && x.day_log.items) lastItems = x.day_log.items; });
+    if (CHECKIN && lastItems) Object.keys(lastItems).forEach(function (k) { A.items[k] = lastItems[k]; });
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch (e) { /* ignore */ }
     var resumeAt = 0;
@@ -124,6 +126,13 @@
     function used(exceptKey) { var s = 0; Object.keys(A.task).forEach(function (k) { if (k !== exceptKey) s += A.task[k] || 0; }); if (A.extra && A.extra.min && exceptKey !== '__extra') s += A.extra.min; return s; }
     var men = function () { return A.men || j.men || plan.crew || 2; };
     // average crew over all the days, so task times answered "for the whole team" convert to man-hours correctly
+    var STEPS = [[0, 'Not yet'], [0.25, 'Started'], [0.5, 'Half'], [0.75, 'Most'], [1, 'Done']];
+    function work() { return plan.tasks.filter(function (t) { return t.category !== 'setup'; }); }
+    function pctDone() {
+      var ts = work(), tot = 0, got = 0;
+      ts.forEach(function (t) { var w = t.est || 1; tot += w; got += w * (A.items[t.key] || 0); });
+      return tot ? Math.round(got / tot * 100) : (A.progress || 0);
+    }
     var avgMen = function () { var w = working(); return w ? (prevManMin + today() * men()) / w : men(); };
     var estTeam = function (t) { return (t.est || 0) * 60 / avgMen(); }; // estimate in team minutes
 
@@ -137,8 +146,14 @@
     Q.push({ label: 'People', id: 'men', title: multi ? 'How many people worked today?' : 'How many people worked on this job?', sub: 'Count everyone, including you.', kind: 'number', key: 'men' });
     Q.push({ label: 'Breaks', id: 'breaks', title: 'How long were your breaks, all up?', sub: 'Smoko and lunch together. If everyone stopped at the same time, count it once.', kind: 'choice', key: 'breaks',
       options: [[0, 'No breaks'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [90, '1½ hours']] });
+    if (CHECKIN && work().length) groups.filter(function (g) { return !g.setup; }).forEach(function (g) {
+      var many = g.members.length > 1;
+      Q.push({ id: 'prog:' + g.key, label: g.name + ' — done', kind: 'items', task: g,
+        title: many ? 'How far through ' + g.phrase + ' are you?' : 'How much of the ' + g.members[0].name.toLowerCase() + ' is done?',
+        sub: (lastItems ? 'Yesterday’s answers are filled in — change what moved on today. ' : 'Counting everything done so far. ') + (many ? 'Tap one for each.' : '') });
+    });
     if (CHECKIN) {
-      Q.push({ label: 'Progress', id: 'progress', kind: 'choice', key: 'progress', title: 'How much of the whole job is done now?', sub: 'Counting earlier days too. A rough guess is fine — it tells us if more days are needed.',
+      if (!work().length) Q.push({ label: 'Progress', id: 'progress', kind: 'choice', key: 'progress', title: 'How much of the whole job is done now?', sub: 'Counting earlier days too. A rough guess is fine — it tells us if more days are needed.',
         options: [[25, 'About a quarter'], [33, 'About a third'], [50, 'About half'], [66, 'About two thirds'], [75, 'About three quarters'], [90, 'Nearly all of it']] });
       Q.push({ label: 'Photos', id: 'photos', kind: 'photos', title: 'Take a progress photo', sub: 'Optional — one shot of where you got to today.' });
       Q.push({ label: 'Notes', id: 'notes', kind: 'notes', title: 'Anything for the next day?', sub: 'Tap to add, or type your own.', quick: ['Gear left on site', 'Start at the back', 'Gate code needed', 'Customer away tomorrow', 'Waste still to take', 'Need more men'] });
@@ -176,6 +191,7 @@
       if (q.kind === 'multi') return A.slow.length > 0;
       if (q.kind === 'photos') return A.photoSkip || photos.some(function (p) { return p.category === 'after'; });
       if (q.kind === 'notes') return A.notes != null;
+      if (q.kind === 'items') return q.task.members.every(function (t) { return A.items[t.key] != null; });
       return true;
     }
     function answerText(q) {
@@ -193,6 +209,7 @@
       if (q.kind === 'notes') return A.notes || 'None';
       if (q.id === 'months') return A.months ? 'In ' + A.months + ' months' : d.closeout ? 'Leave as it is' : 'No reminder';
       if (q.id === 'allDone') return A.allDone ? 'Yes' : 'No — coming back';
+      if (q.kind === 'items') return q.task.members.map(function (t) { var st = STEPS.filter(function (x) { return x[0] === A.items[t.key]; })[0]; return (q.task.members.length > 1 ? t.name + ': ' : '') + (st ? st[1] : '—'); }).join(', ');
       if (q.id === 'progress') return (q.options.filter(function (o) { return o[0] === A.progress; })[0] || [0, ''])[1];
       return '';
     }
@@ -237,6 +254,12 @@
         h += '<div class="cx-left' + (left < 0 ? ' over' : '') + '">' + (left > 0 ? 'Time left to account for: <b>' + dur(left) + '</b>' : left === 0 ? 'All of the working time is accounted for' : 'That’s <b>' + dur(-left) + '</b> more than the working time') + '</div>';
         h += '<div class="cx-opts two">' + (q.last && left > 0 ? big(left, 'All the rest · ' + dur(left), cur === left, 'wide accent') : '') + opts.map(function (m) { return big(m, dur(m), cur === m); }).join('') + '</div>';
         h += '<div class="cx-adjust"><span>Or set it exactly:</span><button class="cx-step" data-step="-15">−15 min</button><b>' + (cur != null ? dur(cur) : '—') + '</b><button class="cx-step" data-step="15">+15 min</button></div>';
+      } else if (q.kind === 'items') {
+        if (q.task.members.length === 1) { var t1 = q.task.members[0]; h += '<div class="cx-opts">' + STEPS.slice().reverse().map(function (st) { return big('it:' + t1.key + ':' + st[0], esc(st[0] === 1 ? 'All done' : st[0] === 0 ? 'Not started yet' : st[1] === 'Most' ? 'Most of it' : st[1] === 'Half' ? 'About half' : 'Just started'), A.items[t1.key] === st[0]); }).join('') + '</div>'; }
+        else h += q.task.members.map(function (t) {
+          return '<div class="cx-item"><b>' + esc(t.name) + (t.qty != null ? ' <small>' + esc(App.qty(t.qty, t.unit)) + '</small>' : '') + '</b><div class="cx-steps">' + STEPS.map(function (st) { return '<button type="button" data-it="' + esc(t.key) + '" data-f="' + st[0] + '" class="' + (A.items[t.key] === st[0] ? 'on' : '') + '">' + st[1] + '</button>'; }).join('') + '</div></div>';
+        }).join('');
+        h += '<p class="cx-note">The whole job: about <b>' + pctDone() + '% done</b>.</p>';
       } else if (q.kind === 'condition') {
         h += '<div class="cx-opts">' + (conds.length ? conds : [{ id: 'maintained' }, { id: 'overgrown' }, { id: 'reduction' }]).map(function (c) { return big(c.id, esc(names[c.id] || c.label), A.cond[q.task.key] === c.id); }).join('') + '</div>';
       } else if (q.kind === 'extra') {
@@ -258,6 +281,7 @@
           '<button class="cx-skip" data-nonotes>' + (A.notes === '' ? '✓ No notes' : 'No notes') + '</button>';
       } else if (q.kind === 'summary') {
         var tasksTotal = used(null), gap = CHECKIN ? 0 : working() - tasksTotal, wk = Math.round(working()), totMH = Math.round((prevManMin + today() * men()) / 60 * 4) / 4;
+        if (CHECKIN) { var pc = pctDone(); h += '<div class="progress" style="height:14px"><i style="width:' + pc + '%"></i></div><p class="cx-note" style="margin:6px 0 14px">About <b>' + pc + '%</b> of the job is done.</p>' + (pc >= 100 ? '<p class="cx-note">Everything is marked done.</p><div class="cx-opts" style="margin-bottom:14px">' + big('fix:closeout', 'It’s all finished — close out the job', false, 'accent') + '</div>' : ''); }
         h += '<div class="cx-sumhead"><div><small>' + (CHECKIN ? 'Worked today' : multi ? 'Working time, ' + j.part + ' days' : 'Working time') + '</small><b>' + Math.floor(wk / 60) + 'h' + (wk % 60 ? ' ' + wk % 60 + 'm' : '') + '</b></div><div><small>People' + (multi ? ' today' : '') + '</small><b>' + men() + '</b></div><div><small>Man-hours</small><b>' + totMH + '</b></div></div>' +
           (gap > 0 ? '<p class="cx-note">' + dur(gap) + ' isn’t linked to a task — we’ll record it as “other time”. Tap Change on a task if you want to add it there.</p>' : gap < 0 ? '<p class="cx-warn">Your task times add up to <b>' + dur(-gap) + '</b> more than the time you worked. Pick one to fix it:</p><div class="cx-opts" style="margin-top:10px">' +
             big('fix:shrink', 'Shrink the task times to fit', false) + big('fix:finish', 'We finished later — make it ' + clock(addMin(A.finished, -gap)), false) + '</div>' : '') +
@@ -275,11 +299,12 @@
     body.addEventListener('click', function (e) {
       var q = Q[i], b;
       if ((b = e.target.closest('[data-jump]'))) { i = +b.getAttribute('data-jump'); show(); return; }
+      if ((b = e.target.closest('[data-it]'))) { A.items[b.getAttribute('data-it')] = +b.getAttribute('data-f'); save(i); var keep = body.scrollTop; show(); body.scrollTop = keep; return; }
       if ((b = e.target.closest('[data-step]'))) { var cur = A.task[q.task.key] != null ? A.task[q.task.key] : q15(estTeam(q.task)); A.task[q.task.key] = Math.max(0, cur + +b.getAttribute('data-step')); save(i); show(); return; }
       if ((b = e.target.closest('[data-note]'))) { var n = b.getAttribute('data-note'); A.notes = (A.notes ? A.notes.replace(/\s+$/, '') + (/[.!]$/.test(A.notes) ? ' ' : '. ') : '') + n; save(i); show(); return; }
       if (e.target.closest('[data-nonotes]')) { A.notes = ''; save(i); show(); advanceSoon(); return; }
       if (e.target.closest('[data-skip]')) { A.photoSkip = !A.photoSkip; save(i); show(); if (A.photoSkip) advanceSoon(); return; }
-      b = e.target.closest('.cx-opt'); if (!b) return;
+      b = e.target.closest('.cx-opt'); if (!b || !b.hasAttribute('data-v')) return;
       var v = b.getAttribute('data-v');
       if (v === 'fix:shrink') {
         var tot = used(null), k = tot ? working() / tot : 1;
@@ -289,6 +314,8 @@
         if (off && big1) A.task[big1] = Math.max(0, A.task[big1] + off); // rounding leftovers go on the biggest task
         save(i); show(); return;
       }
+      if (v.indexOf('it:') === 0) { var cut = v.lastIndexOf(':'); A.items[v.slice(3, cut)] = +v.slice(cut + 1); save(i); show(); advanceSoon(); return; }
+      if (v === 'fix:closeout') { try { localStorage.removeItem(SAVE); } catch (x) { /* ignore */ } close(); runCloseout(d, onDone, rates, 'closeout'); return; }
       if (v === 'fix:finish') { A.finished = addMin(A.finished, used(null) - working()); save(i); show(); return; }
       if (q.kind === 'confirmTime') {
         var sched = q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16);
@@ -331,21 +358,25 @@
 
     function finishDay() {
       var next = el.querySelector('.cx-next'); next.disabled = true; next.textContent = 'Saving…';
-      App.post('jobs/' + j.id + '/checkin', { arrived: A.arrived, finished: A.finished, men: men(), breakMinutes: A.breaks || 0, progress: A.progress, notes: A.notes || '' }).then(function (r) {
+      App.post('jobs/' + j.id + '/checkin', { arrived: A.arrived, finished: A.finished, men: men(), breakMinutes: A.breaks || 0, progress: Math.max(1, Math.min(99, pctDone())), items: work().length ? A.items : null, notes: A.notes || '' }).then(function (r) {
         try { localStorage.removeItem(SAVE); } catch (e) { /* ignore */ }
-        var behind = r.needMH > r.bookedMH * 1.15 + 1, ahead = r.bookedMH > r.needMH * 1.5 + 4;
+        var behind = r.needMH > r.bookedMH * 1.1 + 1, ahead = r.bookedMH > r.needMH * 1.15 + 2, needQ = Math.max(0.25, Math.ceil(r.needMH * 4) / 4);
         body.innerHTML = '<div class="cx-in cx-done"><div class="cx-big-tick">' + icon('check') + '</div><h1 class="cx-q">Day ' + j.part + ' saved</h1>' +
           '<p class="cx-sub">' + esc(j.customer) + ' · ' + r.doneMH + ' man-hours done so far · about ' + r.log.progress + '% of the job.</p>' +
           '<div class="progress"><i style="width:' + r.log.progress + '%"></i></div>' +
-          (behind ? '<p class="cx-warn">At this rate the rest needs about <b>' + Math.round(r.needMH * 4) / 4 + ' man-hours</b>, but only <b>' + r.bookedMH + '</b> are booked.</p><button class="cx-opt accent" id="cx-addday" style="width:100%;margin-top:10px">Add another day</button>'
-            : ahead ? '<p class="cx-note">You’re ahead — the rest looks like about ' + Math.round(r.needMH * 4) / 4 + ' man-hours, and ' + r.bookedMH + ' are booked. You can shorten the job from the schedule.</p>'
+          (behind ? '<p class="cx-warn">At this rate the rest needs about <b>' + needQ + ' man-hours</b>, but only <b>' + r.bookedMH + '</b> are booked.</p>'
+            : ahead ? '<p class="cx-note">You’re ahead — the rest looks like about <b>' + needQ + ' man-hours</b>, and ' + r.bookedMH + ' are booked.</p>'
             : '<p class="cx-note">On track — ' + r.bookedMH + ' man-hours are booked for the rest.</p>') +
-          (r.next ? '<p class="cx-sub" style="margin-top:14px">Next: <b>' + new Date(r.next.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' }) + ', ' + clock(r.next.start.slice(11, 16)) + '</b></p>' : '<p class="cx-warn">No more days are booked for this job.</p><button class="cx-opt accent" id="cx-addday" style="width:100%;margin-top:10px">Add another day</button>') + '</div>';
-        var add = body.querySelector('#cx-addday');
-        if (add) add.onclick = function () {
-          add.disabled = true; add.textContent = 'Adding…';
-          App.post('jobs/' + j.id + '/addday', {}).then(function (x) { var dd = x.flowed.days; add.outerHTML = '<p class="cx-note">Added — the job now runs to <b>' + new Date(dd[dd.length - 1].slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' }) + '</b>.</p>'; })
-            .catch(function (x) { add.disabled = false; add.textContent = 'Add another day'; App.toast(x.message, 'err', 6000); });
+          (behind || ahead || !r.next ? '<button class="cx-opt accent" id="cx-fit" style="width:100%;margin-top:10px">' + (behind || !r.next ? 'Book more time for the rest (' + needQ + ' man-h)' : 'Shorten the days left to ' + needQ + ' man-h') + '</button>' : '') +
+          (r.next ? '<p class="cx-sub" style="margin-top:14px" id="cx-next">Next: <b>' + new Date(r.next.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' }) + ', ' + clock(r.next.start.slice(11, 16)) + '</b></p>' : '') + '</div>';
+        var fit = body.querySelector('#cx-fit');
+        if (fit) fit.onclick = function () {
+          fit.disabled = true; fit.textContent = 'Updating the schedule…';
+          App.post('jobs/' + j.id + '/reflow', { totalManHours: needQ }).then(function (x) {
+            var dd = x.flowed.days, fmt = function (v) { return new Date(v.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }); };
+            fit.outerHTML = '<p class="cx-note">Done — ' + dd.length + ' day' + (dd.length === 1 ? '' : 's') + ' left: <b>' + dd.map(fmt).join(', ') + '</b>.</p>';
+            var nx = body.querySelector('#cx-next'); if (nx) nx.remove();
+          }).catch(function (x) { fit.disabled = false; fit.textContent = 'Try again'; App.toast(x.message, 'err', 6000); });
         };
         el.querySelector('.cx-back').style.visibility = 'hidden'; el.querySelector('.cx-bar i').style.width = '100%'; el.querySelector('.cx-count').textContent = 'Saved';
         next.disabled = false; next.textContent = 'Done'; next.onclick = function () { close(); if (onDone) onDone(); };
@@ -410,8 +441,11 @@
         if (multi) {
           var logged = days.reduce(function (a, x) { return a + (x.day_log ? x.day_log.workingMH || 0 : 0); }, 0), booked = days.reduce(function (a, x) { return a + (x.status !== 'Completed' ? +x.man_hours || 0 : 0); }, 0);
           var lastLog = days.filter(function (x) { return x.day_log; }).pop(), pct = c ? 100 : lastLog ? lastLog.day_log.progress : 0;
+          var doneItems = lastLog && lastLog.day_log.items, doneList = doneItems ? '<div class="done-list">' + plan.tasks.filter(function (t) { return t.category !== 'setup'; }).map(function (t) {
+            var f = Math.round((doneItems[t.key] || 0) * 100); return '<div class="done-row"><span>' + esc(t.name) + '</span><div class="progress"><i style="width:' + f + '%"></i></div><span>' + f + '%</span></div>';
+          }).join('') + '</div>' : '';
           daysCard = '<div class="card"><div class="card-h"><h2>Days</h2><span class="muted small">' + (c ? 'Finished' : pct ? 'About ' + pct + '% done' : 'Not started') + '</span></div><div class="card-b">' +
-            '<div class="progress"><i style="width:' + pct + '%"></i></div><p class="muted small" style="margin:0 0 10px">' + mhs(logged) + ' man-hours done' + (booked ? ' · ' + mhs(booked) + ' booked for the days to go' : '') + ' · quoted ' + mhs(plan.estimate) + '</p><div class="days">' +
+            '<div class="progress"><i style="width:' + pct + '%"></i></div><p class="muted small" style="margin:0 0 10px">' + mhs(logged) + ' man-hours done' + (booked ? ' · ' + mhs(booked) + ' booked for the days to go' : '') + ' · quoted ' + mhs(plan.estimate) + '</p>' + doneList + '<div class="days">' +
             days.map(function (x) {
               var l = x.day_log, dd = x.status === 'Unscheduled' ? 'not booked yet' : new Date(x.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
               return '<a class="dayrow' + (x.status === 'Completed' ? ' done' : '') + (x.id === j.id ? ' cur' : '') + '" href="#/jobs/' + esc(x.id) + '"><span class="dn">' + (x.status === 'Completed' ? icon('check') : x.part) + '</span><span class="grow"><b>Day ' + x.part + ' · ' + dd + '</b><small>' +

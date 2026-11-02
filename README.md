@@ -40,6 +40,8 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    man-hours re-spread the days still to do; **Add another day** extends it. Unscheduling removes every day still to do.
    Drag any day onto the **To schedule** tray (or use **Send day back** in the job window) to take it off the calendar; it
    waits there with its man-hours until it is dragged onto a day again.
+   **Crew per day**: in a day's job window, change the men for *just that day* (it gets more or less done; the days after
+   keep their crew and re-spread) or for *that day and after*. Each day keeps its own crew when the job is re-spread.
    **Day / Week / Month** views, with − / + zoom on the day and week views. Each day shows its total value, man-hours and
    jobs along the bottom (a job split over days shares its price by man-hours). In Month, drag a job onto another day or
    tap a date to open that day.
@@ -48,8 +50,11 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    one-question-at-a-time flow built for the phone: start and finish times, people, breaks, then how long each kind of
    work took (all the hedging together, then lawns, garden, trees, other, setup), access, slow-downs, green waste,
    **photos**, notes and the **next trim**. Each close-out adds rows to the man-hours database.
-   On a **multi-day job**, each day except the last gets a short **end-of-day check-in** (times, people, breaks, roughly how
-   much is done, a photo, notes for tomorrow); it warns when the job is running behind and can add a day. The close-out on
+   On a **multi-day job**, each day except the last gets a short **end-of-day check-in**: times, people, breaks, then how far
+   through each part of the job you are (Not yet / Started / Half / Most / Done for each hedge, lawn…, carried over from the
+   day before). That gives the % done (weighted by the quote's estimates) and the man-hours the rest needs at the pace so
+   far; one tap re-books the remaining days to fit (more days if behind, fewer if ahead). The job page shows each part's
+   progress. The close-out on
    the last day (or on any day, by answering "Yes — it's all finished") adds up every day and cancels days no longer needed.
 8. **Trims due** on the Overview (within 30 days): **Book same price** (an accepted quote at last time's price, straight
    to the schedule tray), **Re-quote** (saved measurements at today's rates), +1 month, or remove.

@@ -661,3 +661,15 @@ body.cx-open #toasts { bottom: calc(var(--safe-b) + 96px); }
 @media (max-width: 760px) { .mgrid { grid-auto-rows: minmax(84px, auto); } .mchip .mt { display: none; } .mtot { font-size: 10px; } .cal-bar .seg button { padding: 5px 8px; } }
 .mtot .short { display: none; }
 @media (max-width: 760px) { .mtot .full, .mtot span { display: none; } .mtot .short { display: inline; } }
+.scope-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.cx-item { padding: 12px 0; border-top: 1px solid var(--line); }
+.cx-item:first-of-type { border-top: 0; }
+.cx-item > b { display: block; font-size: 17px; margin-bottom: 8px; }
+.cx-item > b small { font-weight: 500; color: var(--muted); font-size: 14px; }
+.cx-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.cx-steps button { min-height: 52px; padding: 4px 2px; border: 2px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; touch-action: manipulation; }
+.cx-steps button.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.done-list { display: grid; gap: 6px; margin: 4px 0 12px; }
+.done-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 44px; align-items: center; gap: 8px; font-size: 13px; }
+.done-row .progress { margin: 0; height: 8px; }
+.done-row span:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }

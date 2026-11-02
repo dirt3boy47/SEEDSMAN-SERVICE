@@ -479,6 +479,7 @@
         '<div class="crewbox"><div><div class="field">Men on the job</div><div class="stepper"><button class="ib" data-men="-1" aria-label="One fewer">−</button><b id="j-men">' + j.men + '</b><button class="ib" data-men="1" aria-label="One more">+</button></div></div>' +
         '<div><div class="field">' + (proj ? 'Man-hours left (all days)' : 'Man-hours') + '</div><input id="j-mh" class="input" type="number" min="0.25" step="0.25" value="' + (mhNow || '') + '" style="width:110px"></div>' +
         '<div class="crew-out"><small>Job time</small><b id="j-time"></b><small id="j-end"></small></div></div>' +
+        (proj ? '<div class="scope-row"><span class="muted small">Change the men for</span><div class="seg sm" id="j-scope"><button type="button" data-sc="day" class="on">Just day ' + j.part + '</button><button type="button" data-sc="rest">Day ' + j.part + ' and after</button></div></div>' : '') +
         '<div class="grid2" style="margin-top:12px"><label class="field">Date<input id="j-date" type="date" value="' + j.date + '"></label><label class="field">Start<input id="j-start" type="time" step="900" value="' + local(j.date, j.startMin).slice(11) + '"></label>' +
         '<label class="field">Crew<select id="j-crew">' + S.crews.map(function (c) { return '<option' + (c === j.crew ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
         '<label class="field">Status<select id="j-status">' + STATUSES.slice(0, 3).map(function (s) { return '<option' + (s === j.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></label>' +
@@ -489,10 +490,12 @@
         (j.status !== 'Completed' ? '<button class="btn" id="j-day">' + icon('plus') + 'Add another day</button>' : '') +
         (proj && j.status !== 'Completed' ? '<button class="btn" id="j-park">Send day ' + j.part + ' back to To schedule</button>' : '') +
         '<button class="btn ghost" id="j-un" style="color:var(--danger)">Unschedule</button><span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="j-ok">Save</button></div>', { noFocus: true });
-      var men = j.men, q = function (id) { return m.el.querySelector('#' + id); };
+      var men = j.men, scope = 'day', q = function (id) { return m.el.querySelector('#' + id); };
+      if (q('j-scope')) q('j-scope').onclick = function (e) { var b = e.target.closest('[data-sc]'); if (!b) return; scope = b.getAttribute('data-sc'); q('j-scope').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); }); upd(); };
       function upd() {
         var mh = parseFloat(q('j-mh').value) || 0, t = mh ? Math.max(SNAP, ceilTo(mh / men * 60, SNAP)) : j.endMin - j.startMin, st = q('j-start').value ? hm(q('j-start').value) : j.startMin, nd = daysFor(mh, men);
         q('j-men').textContent = men; q('j-time').textContent = nd > 1 ? 'About ' + nd + ' days' : dur(t); q('j-end').textContent = nd > 1 ? dur(t) + ' of work for ' + men + ' men' : 'finishes about ' + clock(st + t);
+        if (proj && men !== j.men) { q('j-time').textContent = 'Day ' + j.part + ': ' + men + ' men'; q('j-end').textContent = (men > j.men ? 'gets more done — ' : 'does less — ') + (scope === 'day' ? 'the days after keep ' + j.men + ' men and re-spread' : 'every day from here has ' + men + ' men'); }
       }
       m.el.addEventListener('click', function (e) { var b = e.target.closest('[data-men]'); if (!b) return; men = Math.max(1, Math.min(12, men + +b.getAttribute('data-men'))); upd(); });
       ['j-mh', 'j-start'].forEach(function (id) { q(id).addEventListener('input', upd); });
@@ -509,7 +512,7 @@
       var dayBtn = q('j-day');
       if (dayBtn) dayBtn.onclick = function () {
         dayBtn.disabled = true;
-        App.post('jobs/' + j.id + '/addday', { men: men }).then(function (r) { m.close(); toastFlow(r.flowed) || App.toast('Another day added.'); return load(); }).catch(function (x) { dayBtn.disabled = false; App.toast(x.message, 'err', 6000); });
+        App.post('jobs/' + j.id + '/addday', {}).then(function (r) { m.close(); toastFlow(r.flowed) || App.toast('Another day added.'); return load(); }).catch(function (x) { dayBtn.disabled = false; App.toast(x.message, 'err', 6000); });
       };
       q('j-ok').onclick = function () {
         var mhVal = parseFloat(q('j-mh').value) || null, crew = q('j-crew').value, date = q('j-date').value || j.date;
@@ -519,8 +522,18 @@
         m.close();
         var p = statusChanged ? App.put('jobs/' + j.id, { status: q('j-status').value, notes: q('j-notes').value, actual_hours: q('j-actual').value || 0 }) : Promise.resolve();
         p.then(function () {
-          // a later day of a multi-day job: more men or hours re-spreads the whole job from its first day still to do
-          if (proj && sizeChanged && !(timeChanged && isHead(j))) return App.post('jobs/' + j.id + '/reflow', { men: men, totalManHours: mhVal }).then(function (r) { toastFlow(r.flowed) || App.toast('Job updated.'); return load(); });
+          // a multi-day job: men change on this day (or this day and after); man-hours left re-spread the days still to do
+          if (proj && sizeChanged && !(timeChanged && isHead(j))) {
+            var chain = Promise.resolve(), msg = '';
+            if (men !== j.men) chain = chain.then(function () { return App.post('jobs/' + j.id + '/crew', { men: men, scope: scope }); }).then(function (r) {
+              var left = r.flowed && r.flowed.ids ? r.flowed.days.length - 1 : 0;
+              msg = 'Day ' + j.part + ' now ' + men + ' men, finishing about ' + clock(hm(r.day.end.slice(11, 16))) + '. ' + (left ? left + ' more day' + (left === 1 ? '' : 's') + ' after it.' : 'That finishes the job.');
+            });
+            if (mhVal != null && Math.abs(mhVal - (mhNow || 0)) > 0.001) chain = chain.then(function () { return App.post('jobs/' + j.id + '/reflow', { totalManHours: mhVal }); }).then(function (r) { if (!msg) toastFlow(r.flowed); });
+            return chain.then(function () { if (msg) App.toast(msg, null, 7000); return load(); }).then(function () {
+              var j2 = S.jobs.filter(function (x) { return x.id === j.id; })[0]; if (timeChanged && j2) moveJob(j2, date, newStart);
+            });
+          }
           var changes = { men: men, manHours: proj ? j.manHours : (mhVal || j.manHours), crew: crew, date: date };
           if (timeChanged) { changes.desired = newStart; changes.attached = false; }
           if (isHead(j) && j.status !== 'Completed' && (timeChanged || sizeChanged || crew !== j.crew)) { changes.flow = true; changes.flowTotal = mhVal || mhNow; }
