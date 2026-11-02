@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hedge Quote · Seedsman Service</title>
+<link rel="stylesheet" href="../vendor/leaflet.css">
+<link rel="stylesheet" href="../css/site.css">
+</head>
+<body class="quote-page">
+<header class="top">
+  <a class="brand" href="../index.html">Seedsman Service</a>
+  <span class="top-title">Hedge quote</span>
+  <button class="btn ghost small" id="new-quote" type="button">New quote</button>
+</header>
+
+<main class="hq">
+  <section class="map-wrap">
+    <div id="map"></div>
+    <form class="map-bar" id="search-form" autocomplete="off">
+      <input type="search" id="search-q" placeholder="Find the address, e.g. 12 Smith St Toowoomba">
+      <button class="btn" type="submit">Find</button>
+      <button class="btn icon" type="button" id="locate" title="Go to my location" aria-label="Go to my location">◎</button>
+      <select id="basemap" aria-label="Map imagery"></select>
+    </form>
+    <div class="search-results" id="search-results" hidden></div>
+
+    <div class="draw-bar" id="draw-bar" hidden>
+      <div class="draw-info">
+        <b id="draw-len">0.0 m</b>
+        <span id="draw-hint">Tap along the hedge to add points. Drag a point to move it.</span>
+      </div>
+      <div class="draw-btns">
+        <button class="btn" type="button" id="draw-undo">Undo</button>
+        <button class="btn" type="button" id="draw-clear">Clear</button>
+        <button class="btn" type="button" id="draw-cancel">Cancel</button>
+        <button class="btn primary" type="button" id="draw-done">Done</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <section>
+      <h2>Hedges</h2>
+      <p class="hint" id="no-hedges">Find the property, then tap <b>Measure a hedge</b> and tap along the hedge on the map.</p>
+      <div id="hedges"></div>
+      <div class="row">
+        <button class="btn primary" type="button" id="add-hedge">+ Measure a hedge</button>
+        <button class="btn" type="button" id="add-typed">+ Type a length</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Extras</h2>
+      <label class="check"><input type="checkbox" id="waste"> Take the green waste away</label>
+    </section>
+
+    <section>
+      <h2>Quote</h2>
+      <div id="totals" class="totals"></div>
+    </section>
+
+    <section>
+      <h2>Customer</h2>
+      <div class="fields">
+        <label>Name<input type="text" id="c-name" autocomplete="name"></label>
+        <label>Phone<input type="tel" id="c-phone" autocomplete="tel"></label>
+        <label>Email<input type="email" id="c-email" autocomplete="email"></label>
+        <label>Address<input type="text" id="c-address" autocomplete="street-address"></label>
+        <label>Notes<textarea id="c-notes" rows="2"></textarea></label>
+      </div>
+    </section>
+
+    <section class="row actions">
+      <button class="btn" type="button" id="copy-quote">Copy quote</button>
+      <button class="btn" type="button" id="email-quote">Email quote</button>
+      <button class="btn" type="button" id="print-quote">Print</button>
+    </section>
+    <pre class="print-out" id="print-out"></pre>
+  </aside>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script src="../vendor/leaflet.js"></script>
+<script src="../js/config.js"></script>
+<script src="../js/geo.js"></script>
+<script src="../js/hedge-quote.js"></script>
+</body>
+</html>
