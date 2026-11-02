@@ -3,31 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign In · Seedsman</title>
-<link rel="stylesheet" href="/css/site.css">
+<meta name="theme-color" content="#0f7a5f">
+<title>Sign In · Seedsman Quote</title>
+<link rel="stylesheet" href="/app/css/app.css">
+<script>try { var t = localStorage.getItem('seedsman-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 </head>
 <body>
-<header class="top"><a class="brand" href="/">Seedsman</a></header>
-<main class="narrow">
-  <h1>Staff sign in</h1>
-  <form id="login" class="card fields">
-    <label>Email<input type="email" id="email" autocomplete="username" required></label>
-    <label>Password<input type="password" id="password" autocomplete="current-password" required></label>
-    <p class="error" id="err" hidden></p>
-    <button class="btn primary" type="submit" id="go">Sign in</button>
+<div class="auth">
+  <form class="panel" id="login">
+    <div class="brand" style="padding:0"><span class="brand-mark"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19c0-8 5-14 15-15-1 10-7 15-15 15z"/><path d="M5 19l8-8"/></svg></span><span><b>Seedsman Quote</b><small>A GeoCanvas companion</small></span></div>
+    <h1>Sign in</h1>
+    <p>Quoting, customers and jobs for your crew.</p>
+    <div class="stack">
+      <label class="field">Email<input type="email" id="email" autocomplete="username" required></label>
+      <label class="field">Password<input type="password" id="password" autocomplete="current-password" required></label>
+      <p class="err" id="err" hidden></p>
+      <button class="btn primary block" type="submit" id="go">Sign in</button>
+    </div>
   </form>
-</main>
-<script src="/js/app.js"></script>
+</div>
 <script>
   (function () {
-    var next = App.params().next || '/customers/';
-    if (!/^\/[^/]/.test(next)) next = '/customers/';
+    var m = /[?&]next=([^&]+)/.exec(location.search), next = m ? decodeURIComponent(m[1]) : '/app/';
+    if (!/^\/[^/]/.test(next) || /^\/login/.test(next)) next = '/app/';
     document.getElementById('login').onsubmit = function (e) {
       e.preventDefault();
       var err = document.getElementById('err'), go = document.getElementById('go');
       err.hidden = true; go.disabled = true;
-      App.post('auth/login', { email: document.getElementById('email').value, password: document.getElementById('password').value })
-        .then(function (d) { App.setToken(d.token); location.href = next; })
+      fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }) })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Sign-in failed.'); return d; }); })
+        .then(function (d) { try { localStorage.setItem('seedsman-session', d.token); } catch (x) {} location.href = next; })
         .catch(function (x) { err.textContent = x.message; err.hidden = false; go.disabled = false; });
     };
   })();
