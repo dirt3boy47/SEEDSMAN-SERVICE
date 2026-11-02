@@ -46,7 +46,7 @@ typical traffic (wider in weekday peaks, 7–9:30am and 3:30–6:30pm); response
 (Distance Matrix API) in **Settings › Drive times** for Google's traffic predictions at each departure time, with an
 optimistic–pessimistic range; the key never leaves the server. If neither answers, a straight-line estimate is used.
 The schedule spaces jobs by these times (+ parking minutes), and **Route** shows the road route, the drive from and back
-to the home base, and each leg's range. Quote travel uses the same router.
+to the home base, and each leg's range. The calendar shows each crew's drive from base before its first job ("Leave 6:15am") and back after its last ("Back 11:30am"); the day heading shows the earliest leave time (orange if before the working day). Quote travel uses the same router.
 
 ## Map imagery
 

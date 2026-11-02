@@ -29,7 +29,7 @@
     if (ctx.query.date) S.focus = ctx.query.date;
 
     function settings() { return S.settings || { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5 }; }
-    function range() { var st = settings(); return { from: Math.max(0, Math.floor(hm(st.dayStart) / 60) * 60 - 60), to: Math.min(24 * 60, Math.ceil(hm(st.dayEnd) / 60) * 60 + 120) }; }
+    function range() { var st = settings(), from = Math.max(0, Math.floor(hm(st.dayStart) / 60) * 60 - 60); if (S.minFrom != null) from = Math.max(0, Math.min(from, S.minFrom)); return { from: from, to: Math.min(24 * 60, Math.ceil(hm(st.dayEnd) / 60) * 60 + 120) }; }
     function daysFit() { var w = el.querySelector('.cal') ? el.querySelector('.cal').clientWidth : window.innerWidth; return Math.max(1, Math.min(7, Math.floor((w - 56) / 96))); }
 
     // ---------------- model ----------------
@@ -117,6 +117,7 @@
         var crews = {}; S.jobs.forEach(function (j) { crews[j.crew] = 1; }); S.crews.forEach(function (c) { crews[c] = 1; });
         S.crews = Object.keys(crews).sort();
         render();
+        ensureBaseRoads();
       }).catch(function (e) { App.toast(e.message, 'err'); });
     }
 
@@ -134,7 +135,7 @@
     function render() {
       if (!el.isConnected) return;
       if (!el.querySelector('.sched')) {
-        el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><span class="muted small" id="wk-sum"></span><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div></div>' +
+        el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><span class="muted small" id="wk-sum"></span><a class="link small" href="#/settings" id="no-base" hidden>Set your home base to show the drive out and back</a><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div></div>' +
           '<aside class="card tray"><div class="card-h"><h2>To schedule <span class="tag" id="tray-n"></span></h2><button class="btn sm" id="tray-add" title="Accept a draft or sent quote">' + icon('plus') + 'Add</button></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
         el.querySelector('#crew-sel').onchange = function (e) {
           if (e.target.value === '__new') { var n = prompt('Name of the new crew:', 'Crew ' + (S.crews.length + 1)); if (n) { S.crews.push(n.trim()); S.crew = n.trim(); } renderCrews(); return; }
@@ -161,7 +162,43 @@
       }).join('') : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>Nothing waiting</b>Accepted quotes appear here, ready to drag onto the calendar. Tap <b>Add</b> to accept a quote the customer said yes to.</div>';
       if (ctx.query.quote) { var f = el.querySelector('.tcard.flash'); if (f) { f.scrollIntoView({ block: 'center' }); App.toast('Drag ' + f.querySelector('b').textContent + ' onto a day to book it.'); } ctx.query.quote = null; }
     }
+    // ---------------- drives from and back to the home base ----------------
+    function crewDays() { // {date|crew: [jobs in order]}
+      var out = {};
+      S.jobs.slice().sort(function (a, b) { return a.startMin - b.startMin; }).forEach(function (j) { (out[j.date + '|' + j.crew] = out[j.date + '|' + j.crew] || []).push(j); });
+      return out;
+    }
+    function baseDrives(list) { // {out: {min, leave, ...}, home: {min, back, ...}} for one crew-day
+      var dp = S.depot; if (!dp || dp.lat == null || !list.length) return null;
+      var first = list[0], last = list[list.length - 1], st = settings(), res = {};
+      var leg = function (a, b, min) {
+        if (a.lat == null || b.lat == null) return null;
+        var r = roadFor(a, b, first.date, min);
+        if (!r) { var km = GIS.straightKm(a, b) * st.roadFactor; r = { km: km, min: km / Math.max(5, st.speedKmh) * 60, source: 'estimate' }; }
+        return r;
+      };
+      var o = leg(dp, first, first.startMin - 60), h = leg(last, dp, last.endMin);
+      if (o) { var om = ceilTo(o.min + st.bufferMinutes, 5); res.out = { min: om, leave: first.startMin - om, r: o }; }
+      if (h) { var hmn = ceilTo(h.min, 5); res.home = { min: hmn, back: last.endMin + hmn, r: h }; }
+      return res;
+    }
+    function ensureBaseRoads() {
+      var dp = S.depot; if (!dp || dp.lat == null) return;
+      var legs = [], keys = [], days = crewDays();
+      Object.keys(days).forEach(function (k) {
+        var list = days[k], first = list[0], last = list[list.length - 1];
+        if (first.lat != null) { var k1 = roadKey(dp, first, first.date, first.startMin - 60); if (!S.road[k1] && keys.indexOf(k1) < 0) { keys.push(k1); legs.push({ from: { lat: dp.lat, lng: dp.lng }, to: { lat: first.lat, lng: first.lng }, depart: local(first.date, Math.max(0, first.startMin - 60)) }); } }
+        if (last.lat != null) { var k2 = roadKey(last, dp, last.date, last.endMin); if (!S.road[k2] && keys.indexOf(k2) < 0) { keys.push(k2); legs.push({ from: { lat: last.lat, lng: last.lng }, to: { lat: dp.lat, lng: dp.lng }, depart: local(last.date, Math.min(1439, last.endMin)) }); } }
+      });
+      if (!legs.length) return;
+      App.post('route', { legs: legs }).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); if (el.isConnected) renderCal(); }).catch(function () { /* estimates stay */ });
+    }
+
     function renderCal() {
+      // the calendar starts early enough to show the earliest drive from base
+      S.minFrom = null;
+      var cds = crewDays(), drives = {};
+      Object.keys(cds).forEach(function (k) { var b = baseDrives(cds[k]); drives[k] = b; if (b && b.out && b.out.leave < (S.minFrom == null ? 1e9 : S.minFrom)) S.minFrom = Math.floor(b.out.leave / 60) * 60; });
       var r = range(), st = settings(), today = iso(new Date()), days = [];
       for (var i = 0; i < S.days; i++) days.push(addDays(S.start, i));
       var cols = 'grid-template-columns: 56px repeat(' + S.days + ', minmax(92px, 1fr))';
@@ -170,10 +207,14 @@
         var list = S.jobs.filter(function (j) { return j.date === d; }), dt = new Date(d + 'T00:00:00');
         var late = list.filter(function (j) { return j.endMin > hm(st.dayEnd); }).length, hours = list.reduce(function (s, j) { return s + (j.manHours || 0); }, 0);
         list.forEach(function (j) { total += +j.total || 0; mh += j.manHours || 0; });
+        var leaves = Object.keys(drives).filter(function (k) { return k.indexOf(d + '|') === 0 && drives[k] && drives[k].out; }).map(function (k) { return drives[k].out.leave; });
+        var leave = leaves.length ? Math.min.apply(null, leaves) : null;
         return '<div class="cal-dh' + (d === today ? ' today' : '') + '"><div><span>' + dt.toLocaleDateString('en-AU', { weekday: 'short' }) + '</span> <b>' + dt.getDate() + '</b></div>' +
+          (leave != null ? '<small' + (leave < hm(st.dayStart) ? ' class="late"' : '') + '>Leave base ' + clock(leave) + '</small>' : '') +
           '<small>' + (list.length ? list.length + ' job' + (list.length === 1 ? '' : 's') + ' · ' + Math.round(hours * 10) / 10 + ' man-h' : '&nbsp;') + '</small>' + (late ? '<small class="late">Runs past ' + clock(hm(st.dayEnd)) + '</small>' : '') +
           (list.length ? '<button class="link small" data-route="' + d + '">' + 'Route</button>' : '') + '</div>';
       }).join('') + '</div>';
+      el.querySelector('#no-base').hidden = !!(S.depot && S.depot.lat != null);
       el.querySelector('#wk-sum').textContent = S.jobs.length + ' job' + (S.jobs.length === 1 ? '' : 's') + ' · ' + Math.round(mh * 10) / 10 + ' man-hours · ' + money(total, 0) + ' incl. GST';
       var H = (r.to - r.from) / 60 * HOUR, body = '<div class="cal-row cal-grid" style="' + cols + ';height:' + H + 'px"><div class="cal-gutter">';
       for (var m = r.from; m < r.to; m += 60) body += '<div class="cal-hour" style="top:' + ((m - r.from) / 60 * HOUR) + 'px">' + clock(m) + '</div>';
@@ -183,6 +224,20 @@
         var html = '<div class="cal-col' + (d === today ? ' today' : '') + '" data-date="' + d + '">';
         html += '<div class="cal-off" style="top:0;height:' + ((hm(st.dayStart) - r.from) / 60 * HOUR) + 'px"></div><div class="cal-off" style="top:' + ((hm(st.dayEnd) - r.from) / 60 * HOUR) + 'px;bottom:0"></div>';
         for (var mm = r.from; mm < r.to; mm += 60) html += '<div class="cal-line" style="top:' + ((mm - r.from) / 60 * HOUR) + 'px"></div>';
+        crews.forEach(function (c, lane) {
+          var b = drives[d + '|' + c], cl = cds[d + '|' + c]; if (!b || !cl) return;
+          var w = 100 / crews.length, pos = 'left:calc(' + (lane * w) + '% + 3px);width:calc(' + w + '% - 6px);', est = function (x) { return x.r.source === 'estimate' ? ' (estimate)' : x.r.low != null && Math.round(x.r.high) > Math.round(x.r.low) ? ' (drive ' + Math.round(x.r.low) + '–' + Math.round(x.r.high) + ' min)' : ''; };
+          if (b.out) {
+            var ht = b.out.min / 60 * HOUR;
+            html += '<div class="cal-base out" style="' + pos + 'top:' + ((b.out.leave - r.from) / 60 * HOUR) + 'px;height:' + ht + 'px" title="Drive from home base: leave ' + clock(b.out.leave) + ', ' + b.out.min + ' min incl. ' + settings().bufferMinutes + ' min to unload' + est(b.out) + '">' +
+              (ht >= 22 ? icon('home') + '<span>Leave ' + clock(b.out.leave) + (ht >= 34 ? ' · ' + b.out.min + ' min' : '') + '</span>' : '') + '</div>';
+          }
+          if (b.home) {
+            var hh = b.home.min / 60 * HOUR;
+            html += '<div class="cal-base home" style="' + pos + 'top:' + ((cl[cl.length - 1].endMin - r.from) / 60 * HOUR) + 'px;height:' + hh + 'px" title="Drive back to base: about ' + clock(b.home.back) + est(b.home) + '">' +
+              (hh >= 22 ? icon('home') + '<span>Back ' + clock(b.home.back) + (hh >= 34 ? ' · ' + b.home.min + ' min' : '') + '</span>' : '') + '</div>';
+          }
+        });
         list.forEach(function (j) {
           var lane = crews.indexOf(j.crew), w = 100 / crews.length, top = (j.startMin - r.from) / 60 * HOUR, h = Math.max(26, (j.endMin - j.startMin) / 60 * HOUR - 2);
           var pos = 'left:calc(' + (lane * w) + '% + 3px);width:calc(' + w + '% - 6px);';

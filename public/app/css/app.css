@@ -459,3 +459,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .gis.measuring .leaflet-overlay-pane path.leaflet-interactive, .gis.measuring .map-pin, .gis.measuring .leaflet-marker-icon:not(.ms-vertex) { pointer-events: none !important; }
 .route-pin.base span { background: var(--signal); width: 30px; height: 30px; }
 .route-pin.base span svg.i { width: 16px; height: 16px; color: #fff; }
+/* drive from / back to the home base */
+.cal-base { position: absolute; z-index: 1; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; overflow: hidden; pointer-events: auto; font-size: 11px; font-weight: 650; color: var(--info);
+  background: repeating-linear-gradient(135deg, var(--info-soft) 0 5px, transparent 5px 10px); border: 1px dashed color-mix(in srgb, var(--info) 45%, transparent); }
+.cal-base svg.i { width: 13px; height: 13px; flex: none; }
+.cal-base span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
