@@ -1,6 +1,6 @@
 // Cloudflare Workers static site: everything in ./public is served as-is.
 {
-  "name": "seedsman-service",
+  "name": "seedsmans",
   "compatibility_date": "2026-10-01",
   "assets": { "directory": "./public" }
 }
