@@ -141,6 +141,8 @@ async function api(request, env, url) {
     case 'jobs': return jobsApi(env, me, m, parts, url, body);
     case 'schedule': return scheduleApi(env, me, m, parts, url, body);
     case 'route': if (m === 'POST') return routeApi(env, body); break;
+    case 'google': if (parts[1] === 'check' && m === 'POST') return googleCheck(env, me, url); break;
+    case 'diag': if (m === 'POST') { await audit(env, me, 'diag', str(body.kind, 40) || 'client', 'error', { message: str(body.message, 500), detail: str(body.detail, 1000), page: str(body.page, 200) }); return json({ ok: true }); } break;
   }
   fail(404, 'Not found.');
 }
@@ -800,4 +802,39 @@ async function routeApi(env, body) {
     }
   }));
   return json({ legs: out });
+}
+
+// ---------------- Google key check (Settings › Test Google keys) ----------------
+// Calls Google from the server the way the browser would (with this site as the referrer for the satellite key) and
+// returns Google's own error messages, so a key set-up problem can be fixed without guesswork.
+async function googleCheck(env, me, url) {
+  const b = await business(env), site = url.origin + '/', out = { site };
+  const tilesKey = b.imagery && b.imagery.googleKey, routesKey = b.routing && b.routing.googleKey;
+  const at = b.depot || b.mapStart || { lat: -38.33, lng: 145.03 };
+  const msgOf = async (r) => { const t = await r.text(); try { const d = JSON.parse(t); return (d.error && (d.error.message || d.error.status)) || d.error_message || d.status || t.slice(0, 300); } catch (e) { return t.slice(0, 300) || ('HTTP ' + r.status); } };
+  if (!tilesKey) out.tiles = { ok: false, step: 'key', message: 'No satellite key saved (Settings › Map imagery).' };
+  else {
+    try {
+      const h = { 'Content-Type': 'application/json', Referer: site, Origin: url.origin };
+      const r = await fetch('https://tile.googleapis.com/v1/createSession?key=' + encodeURIComponent(tilesKey), { method: 'POST', headers: h, body: JSON.stringify({ mapType: 'satellite', language: 'en-AU', region: 'AU', layerTypes: ['layerRoadmap'], overlay: false }) });
+      if (!r.ok) out.tiles = { ok: false, step: 'session', status: r.status, message: await msgOf(r) };
+      else {
+        const sess = (await r.json()).session, z = 18, n = Math.pow(2, z);
+        const x = Math.floor((at.lng + 180) / 360 * n), y = Math.floor((1 - Math.log(Math.tan(at.lat * Math.PI / 180) + 1 / Math.cos(at.lat * Math.PI / 180)) / Math.PI) / 2 * n);
+        const t = await fetch('https://tile.googleapis.com/v1/2dtiles/' + z + '/' + x + '/' + y + '?session=' + sess + '&key=' + encodeURIComponent(tilesKey), { headers: { Referer: site, Origin: url.origin } });
+        out.tiles = t.ok ? { ok: true, step: 'tile', status: t.status, message: 'Satellite tiles load (' + (t.headers.get('content-type') || 'image') + ').' } : { ok: false, step: 'tile', status: t.status, message: await msgOf(t) };
+      }
+    } catch (e) { out.tiles = { ok: false, step: 'network', message: String(e.message || e) }; }
+  }
+  if (!routesKey) out.routes = { ok: false, step: 'key', message: 'No drive-times key saved (Settings › Drive times).' };
+  else {
+    try {
+      const r = await fetch(env.GOOGLE_ROUTES_URL || GOOGLE_ROUTES_DEFAULT, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': routesKey, 'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters' },
+        body: JSON.stringify({ origin: { location: { latLng: { latitude: at.lat, longitude: at.lng } } }, destination: { location: { latLng: { latitude: at.lat + 0.05, longitude: at.lng + 0.05 } } }, travelMode: 'DRIVE', routingPreference: 'TRAFFIC_AWARE_OPTIMAL', departureTime: new Date(Date.now() + 3600000).toISOString(), trafficModel: 'BEST_GUESS' }) });
+      if (!r.ok) out.routes = { ok: false, status: r.status, message: await msgOf(r) };
+      else { const d = await r.json(), rt = d.routes && d.routes[0]; out.routes = rt ? { ok: true, message: 'Drive times work (test drive ' + Math.round(parseFloat(rt.duration) / 60) + ' min).' } : { ok: false, message: 'Google returned no route.' }; }
+    } catch (e) { out.routes = { ok: false, message: String(e.message || e) }; }
+  }
+  await audit(env, me, 'diag', 'google-check', 'check', out);
+  return json(out);
 }

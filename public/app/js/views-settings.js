@@ -115,7 +115,7 @@
           '<label class="field">Nearmap API key<input id="im-nm" type="password" autocomplete="off" value="' + esc(im.nearmapKey || '') + '" placeholder="From Nearmap › Account › API keys"></label>' +
           '<div class="grid2"><label class="field">MetroMap API key<input id="im-mm" type="password" autocomplete="off" value="' + esc(im.metromapKey || '') + '" placeholder="From MetroMap support"></label><label class="field">MetroMap layer<input id="im-ml" value="' + esc(im.metromapLayer || 'Australia_latest') + '"></label></div>' +
           '<label class="field">Open maps with<select id="im-def">' + [['', 'Best available'], ['nearmap', 'Nearmap'], ['metromap', 'MetroMap'], ['google', 'Google satellite'], ['clarity', 'Satellite HD (Esri Clarity)'], ['world', 'Satellite (Esri)'], ['vic', 'Vicmap aerial (licensed)'], ['street', 'Street map']].map(function (o) { return '<option value="' + o[0] + '"' + ((im.default || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
-          '<div><button class="btn" id="im-save">' + icon('save') + 'Save imagery</button></div></div></div>' +
+          '<div class="row"><button class="btn" id="im-save">' + icon('save') + 'Save imagery</button><button class="btn" id="g-test">' + icon('check') + 'Test Google keys</button></div><div id="g-result"></div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Drive times</h2><span class="tag">' + (rt.hasGoogleKey ? 'Google traffic' : 'Open-source roads') + '</span></div><div class="card-b stack">' +
           '<p class="muted small" style="margin:0">Drive times come from real road routes (OSRM, open source, on OpenStreetMap) with a range for typical traffic. For traffic-aware times — Google’s prediction for the departure time, with an optimistic–pessimistic range — add a Google Maps API key with the <b>Routes API</b> enabled (the older Distance Matrix API also works if your project has it). Use a key with no website restriction — it stays on the server and is never sent to browsers.</p>' +
           '<label class="field">Google Maps API key<input id="rt-key" type="password" autocomplete="off" placeholder="' + (rt.hasGoogleKey ? 'Saved — type a new key to replace it' : 'Optional') + '"></label>' +
@@ -134,6 +134,32 @@
       var saveRt = function (k) { App.put('business', { routing: { googleKey: k } }).then(function () { App.toast(k ? 'Google key saved — drive times now use traffic predictions.' : 'Google key removed — drive times use open-source road routes.'); App.refreshMe(); App.go('#/settings'); }).catch(function (x) { App.toast(x.message, 'err'); }); };
       $('rt-save').onclick = function () { var k = $('rt-key').value.trim(); if (!k) return App.toast('Paste the key first.', 'warn'); saveRt(k); };
       if ($('rt-del')) $('rt-del').onclick = function () { saveRt(''); };
+      function fixFor(kind, r) {
+        var m = (r.message || '').toLowerCase(), api = kind === 'tiles' ? 'Map Tiles API' : 'Routes API', site = location.origin + '/*';
+        if (r.ok) return '';
+        if (r.step === 'key') return '';
+        if (/referer|referrer/.test(m)) return kind === 'tiles'
+          ? 'The key’s website restriction doesn’t match this site. In Google Cloud › APIs & Services › Credentials › this key › Application restrictions › Websites, add exactly: <code>' + App.esc(site) + '</code>'
+          : 'This key has a website restriction, which Google doesn’t allow for server-side routing. Set Application restrictions to <b>None</b> and restrict it by API to the Routes API instead.';
+        if (/requested entity was not found|caller does not have permission/.test(m)) return 'The key is fine, but Google refused the ' + api + ' for its project. In Google Cloud for that project: (1) <b>Billing</b> › link a billing account (Google Maps needs one, even within the free allowance); (2) <b>APIs & Services › Library › ' + api + ' › Enable</b>. Wait a few minutes, then test again.';
+        if (/has not been used|is disabled|service_disabled|not enabled|enable it by visiting/.test(m)) return 'Turn on the <b>' + api + '</b> for this key’s project: Google Cloud › APIs & Services › Library › ' + api + ' › Enable. Then wait 2–5 minutes and test again.';
+        if (/billing/.test(m)) return 'Billing isn’t turned on for this Google Cloud project. Google Cloud › Billing › link a billing account, then test again.';
+        if (/blocked|not authorized|api_key_service_blocked|permission/.test(m)) return 'The key’s <b>API restrictions</b> don’t include the ' + api + '. Credentials › this key › API restrictions › add ' + api + ' (or choose Don’t restrict key).';
+        if (/api key not valid|invalid/.test(m)) return 'Google says the key isn’t valid — it may have been copied with a missing or extra character. Copy it again from Credentials and save.';
+        return 'Google’s message is above — check the ' + api + ' is enabled and the key restrictions allow it.';
+      }
+      $('g-test').onclick = function () {
+        var box = $('g-result'); box.innerHTML = '<p class="muted small">Asking Google…</p>';
+        App.post('google/check').then(function (d) {
+          var row = function (title, kind, r) {
+            if (!r) return '';
+            var fx = fixFor(kind, r);
+            return '<div class="g-check ' + (r.ok ? 'ok' : 'bad') + '"><b>' + (r.ok ? '✓ ' : '✗ ') + title + '</b><div class="small">' + App.esc(r.message || '') + (r.status ? ' (HTTP ' + r.status + (r.step ? ', ' + r.step : '') + ')' : '') + '</div>' + (fx ? '<div class="small fix">' + fx + '</div>' : '') + '</div>';
+          };
+          box.innerHTML = row('Google satellite (Map Tiles API)', 'tiles', d.tiles) + row('Google drive times (Routes API)', 'routes', d.routes);
+          if (d.tiles && d.tiles.ok) { try { localStorage.removeItem('seedsman-gsession'); } catch (e) { /* ignore */ } }
+        }).catch(function (x) { box.innerHTML = '<p class="err">' + App.esc(x.message) + '</p>'; });
+      };
       $('im-save').onclick = function () {
         App.put('business', { imagery: { googleKey: $('im-gg').value, nearmapKey: $('im-nm').value, metromapKey: $('im-mm').value, metromapLayer: $('im-ml').value, default: $('im-def').value } }).then(function () {
           try { localStorage.removeItem('seedsman-basemap'); } catch (e) { /* ignore */ }

@@ -141,6 +141,7 @@
           setGoogleAttr(''); googleAttribution();
         }).catch(function (e) {
           if (dead || current !== key) return;
+          try { App.post('diag', { kind: 'google-tiles', message: e.message, page: location.hash }); } catch (x) { /* ignore */ }
           App.toast('Google satellite didn’t start (' + e.message + '). Check the Map Tiles API is enabled for the key. Showing Esri satellite.', 'warn', 8000);
           setBase('world', true);
         });
@@ -154,8 +155,9 @@
     function watch(tl) {
       var ok = 0, bad = 0, done = false;
       tl.on('tileload', function () { ok++; });
-      tl.on('tileerror', function () {
+      tl.on('tileerror', function (ev) {
         bad++; if (done || ok || bad < 6 || navigator.onLine === false) return; done = true;
+        try { App.post('diag', { kind: 'tiles-failed', message: current + ' tiles failed', detail: ev && ev.tile ? String(ev.tile.src).replace(/key=[^&]+/, 'key=…').replace(/apikey=[^&]+/, 'apikey=…').slice(0, 300) : '', page: location.hash }); } catch (x) { /* ignore */ }
         App.toast('That imagery isn’t loading here (check the key or subscription), so Esri satellite is shown instead.', 'warn', 6000);
         setBase('world', true);
       });
