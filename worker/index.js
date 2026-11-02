@@ -150,6 +150,7 @@ async function api(request, env, url) {
       if (parts[1] && parts[2] === 'closeout' && m === 'POST') return closeoutJob(env, me, parts[1], body);
       if (parts[1] && parts[2] === 'checkin' && m === 'POST') return checkinJob(env, me, parts[1], body);
       if (parts[1] && (parts[2] === 'reflow' || parts[2] === 'addday') && m === 'POST') return reflowJob(env, me, parts[1], parts[2], body);
+      if (parts[1] && parts[2] === 'park' && m === 'POST') return parkJob(env, me, parts[1]);
       if (parts[1] && !parts[2] && m === 'GET') return jobDetail(env, parts[1], url);
       return jobsApi(env, me, m, parts, url, body);
     case 'photos': if (parts[1] && m === 'DELETE') return photoDelete(env, me, parts[1]); break;
@@ -241,7 +242,8 @@ const JOB_LIST = "SELECT j.*, c.name AS customer, c.phone, p.address, p.suburb, 
   "coalesce(j.man_hours, json_extract(q.calculation, '$.personHours')) AS work_hours, coalesce(j.men, json_extract(q.calculation, '$.crew'), 2) AS crew_size, " +
   "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS services, " +
   "(SELECT x.id FROM jobs x WHERE x.project_id = j.project_id AND x.status IN ('Scheduled','In progress') ORDER BY x.part LIMIT 1) AS project_head, " +
-  "(SELECT sum(x.man_hours) FROM jobs x WHERE x.project_id = j.project_id AND x.status IN ('Scheduled','In progress')) AS project_open_hours " +
+  "(SELECT sum(x.man_hours) FROM jobs x WHERE x.project_id = j.project_id AND x.status IN ('Scheduled','In progress')) AS project_open_hours, " +
+  "(SELECT sum(x.man_hours) FROM jobs x WHERE x.project_id = j.project_id AND x.status != 'Cancelled') AS project_hours " +
   "FROM jobs j JOIN customers c ON c.id = j.customer_id JOIN properties p ON p.id = j.property_id JOIN quotes q ON q.id = j.quote_id";
 
 async function dashboard(env) {
@@ -571,7 +573,7 @@ async function jobsApi(env, me, m, parts, url, body) {
   const jid = parts[1];
   if (!jid && m === 'GET') {
     const from = str(url.searchParams.get('from'), 16), to = str(url.searchParams.get('to'), 16);
-    const where = ["j.status != 'Cancelled'"], vals = [];
+    const where = ["j.status NOT IN ('Cancelled','Unscheduled')"], vals = [];
     if (from) { where.push('j.end >= ?'); vals.push(from); }
     if (to) { where.push('j.start < ?'); vals.push(to); }
     return json({ jobs: (await env.DB.prepare(JOB_LIST + ' WHERE ' + where.join(' AND ') + ' ORDER BY j.start LIMIT 500').bind(...vals).all()).results });
@@ -608,7 +610,7 @@ async function jobsApi(env, me, m, parts, url, body) {
     return json({ job: await env.DB.prepare(JOB_LIST + ' WHERE j.id = ?').bind(jid).first() });
   }
   if (m === 'DELETE') { // a multi-day job is unscheduled as a whole (days already checked in stay)
-    if (j.project_id) await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND status IN ('Scheduled','In progress')").bind(j.project_id).run();
+    if (j.project_id) { await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND status IN ('Scheduled','In progress','Unscheduled')").bind(j.project_id).run(); await renumber(env, j.project_id); }
     else await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(jid).run();
     return json({ ok: true });
   }
@@ -621,7 +623,8 @@ async function scheduleApi(env, me, m, parts, url, body) {
   if (!parts[1] && m === 'GET') {
     const from = str(url.searchParams.get('from'), 16), to = str(url.searchParams.get('to'), 16);
     if (!LOCAL_DT.test(from) || !LOCAL_DT.test(to)) fail(400, 'Choose a date range.');
-    const jobs = (await env.DB.prepare(JOB_LIST + " WHERE j.status != 'Cancelled' AND j.end >= ? AND j.start < ? ORDER BY j.start").bind(from, to).all()).results;
+    const jobs = (await env.DB.prepare(JOB_LIST + " WHERE j.status NOT IN ('Cancelled','Unscheduled') AND j.end >= ? AND j.start < ? ORDER BY j.start").bind(from, to).all()).results;
+    const parked = (await env.DB.prepare(JOB_LIST + " WHERE j.status = 'Unscheduled' ORDER BY j.updated_at").all()).results;
     const waiting = (await env.DB.prepare(
       "SELECT q.id, q.number, q.updated_at, json_extract(q.calculation, '$.total') AS total, json_extract(q.calculation, '$.personHours') AS man_hours, " +
       "coalesce(json_extract(q.calculation, '$.crew'), 2) AS crew_size, json_extract(q.calculation, '$.needsPicker') AS picker, c.name AS customer, c.phone, p.address, p.suburb, p.lat, p.lng, " +
@@ -629,7 +632,7 @@ async function scheduleApi(env, me, m, parts, url, body) {
       "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id " +
       "WHERE q.status = 'Accepted' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') ORDER BY q.updated_at").all()).results;
     const b = await business(env);
-    return json({ jobs, waiting, settings: Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}), depot: b.depot || null });
+    return json({ jobs, waiting, parked, settings: Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}), depot: b.depot || null });
   }
   if (parts[1] === 'settings' && m === 'PUT') {
     const b = await business(env), cur = Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {});
@@ -651,7 +654,7 @@ async function scheduleApi(env, me, m, parts, url, body) {
 async function applySchedule(env, me, body) {
   const list = (Array.isArray(body.jobs) ? body.jobs : []).slice(0, 200);
   if (!list.length) fail(400, 'Nothing to schedule.');
-  const park = [], place = [], created = [], flows = [], flowed = [];
+  const park = [], place = [], created = [], flows = [], flowed = [], touched = new Set();
   const seenQuotes = {}, st0 = await scheduleSettings(env), dayLen = hmMin(st0.dayEnd) - hmMin(st0.dayStart);
   // a one-day job longer than a working day is always spread over days, even if an older app didn't ask for it
   for (const x of list) {
@@ -668,10 +671,11 @@ async function applySchedule(env, me, body) {
     const crew = str(x.crew, 60) || 'Crew 1', men = Math.max(1, Math.min(20, parseInt(x.men, 10) || 2));
     const manHours = numOrNull(x.man_hours), travel = Math.max(0, Math.min(600, parseInt(x.travel_minutes, 10) || 0)), seq = parseInt(x.sequence, 10) || 0;
     if (x.id) {
-      const j = await env.DB.prepare("SELECT id FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(str(x.id, 40)).first();
+      const j = await env.DB.prepare("SELECT id, project_id FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(str(x.id, 40)).first();
       if (!j) fail(404, 'A job was not found — reload the schedule.');
+      if (j.project_id) touched.add(j.project_id);
       park.push(env.DB.prepare("UPDATE jobs SET crew = '__moving__' || id WHERE id = ?").bind(j.id));
-      place.push(env.DB.prepare("UPDATE jobs SET start = ?, end = ?, crew = ?, men = ?, man_hours = coalesce(?, man_hours), travel_minutes = ?, sequence = ?, updated_at = datetime('now') WHERE id = ?")
+      place.push(env.DB.prepare("UPDATE jobs SET start = ?, end = ?, crew = ?, men = ?, man_hours = coalesce(?, man_hours), travel_minutes = ?, sequence = ?, status = CASE WHEN status = 'Unscheduled' THEN 'Scheduled' ELSE status END, updated_at = datetime('now') WHERE id = ?")
         .bind(start, end, crew, men, manHours, travel, seq, j.id));
     } else {
       const q = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(str(x.quote_id, 40)).first();
@@ -708,11 +712,12 @@ async function applySchedule(env, me, body) {
         if (quote.status !== 'Accepted') place.push(env.DB.prepare("UPDATE quotes SET status = 'Accepted', updated_at = datetime('now') WHERE id = ?").bind(quote.id));
       }
       const r = await flowProject(env, st, { quote, rows, start, crew, men, totalMH: numOrNull(x.flow_total) ?? numOrNull(x.man_hours), travel: parseInt(x.travel_minutes, 10) || 0, seq: parseInt(x.sequence, 10) || 0, moves });
-      park.push(...r.park); place.push(...r.place); flowed.push(r.info);
+      park.push(...r.park); place.push(...r.place); flowed.push(r.info); if (r.info.projectId) touched.add(r.info.projectId);
       if (!x.id) created.push({ id: r.info.ids[0], quote: quote.number, start });
     }
   }
   await env.DB.batch(park.concat(place));
+  for (const pid of touched) await renumber(env, pid);
   await audit(env, me, 'schedule', 'apply', 'update', { jobs: list.length, created, flowed });
   return json({ ok: true, created, flowed });
 }
@@ -1007,14 +1012,15 @@ function planDays(st, date, startMin, totalMH, men, busy, skipFirst) {
 /** Lay out a job (new, single or multi-day) from `start`: returns statements to park the old days and place the new ones.
     rows: the job's current days (completed days stay put and are counted as done). */
 async function flowProject(env, st, o) {
-  const done = o.rows.filter((r) => r.status === 'Completed'), open = o.rows.filter((r) => r.status !== 'Completed' && r.status !== 'Cancelled');
+  const done = o.rows.filter((r) => r.status === 'Completed'), open = o.rows.filter((r) => r.status === 'Scheduled' || r.status === 'In progress');
+  const waiting = o.rows.filter((r) => r.status === 'Unscheduled');
   const calc = parseJson(o.quote.calculation, {});
   const openMH = open.reduce((a, r) => a + (+r.man_hours || 0), 0);
   const total = Math.max(0.25, o.totalMH != null ? o.totalMH : openMH || (calc.personHours || 1));
   const date = o.start.slice(0, 10), startMin = hmMin(o.start.slice(11, 16));
   // what else this crew already has on the following days (other jobs being moved count at their new times)
   const skip = new Set(open.map((r) => r.id).concat(o.moves.map((x) => x.id)));
-  const others = (await env.DB.prepare("SELECT id, start, end FROM jobs WHERE crew = ? AND status != 'Cancelled' AND start >= ? AND start < ?").bind(o.crew, date, nextDate(date, 120)).all()).results
+  const others = (await env.DB.prepare("SELECT id, start, end FROM jobs WHERE crew = ? AND status NOT IN ('Cancelled','Unscheduled') AND start >= ? AND start < ?").bind(o.crew, date, nextDate(date, 120)).all()).results
     .filter((r) => !skip.has(r.id)).concat(o.moves.filter((x) => x.crew === o.crew));
   const busy = (d) => others.filter((r) => r.start.slice(0, 10) === d).map((r) => [hmMin(r.start.slice(11, 16)), r.end.slice(0, 10) === d ? hmMin(r.end.slice(11, 16)) : 1440]);
   const days = planDays(st, date, startMin, total, o.men, busy, o.skipFirst);
@@ -1022,7 +1028,7 @@ async function flowProject(env, st, o) {
   let given = 0;
   days.forEach((d, i) => { d.mh = i === days.length - 1 ? Math.max(0.25, Math.round((total - given) * 100) / 100) : Math.round((d.e - d.s) / 60 * o.men * 100) / 100; given += d.mh; });
   const ids = days.map((d, i) => (open[i] ? open[i].id : newId('job')));
-  const parts = done.length + days.length;
+  const parts = done.length + days.length + waiting.length;
   const projectId = (o.rows.find((r) => r.project_id) || {}).project_id || (parts > 1 ? (done[0] || {}).id || ids[0] : null);
   const park = [], place = [], title = (o.quote.cname || 'Job') + ' — ' + o.quote.number;
   open.forEach((r, i) => park.push(i < days.length ? env.DB.prepare("UPDATE jobs SET crew = '__moving__' || id WHERE id = ?").bind(r.id)
@@ -1035,14 +1041,14 @@ async function flowProject(env, st, o) {
       .bind(ids[i], o.quote.id, o.quote.customer_id, o.quote.property_id, title, start, end, o.crew, o.men, d.mh, travel, seq, projectId, part, parts));
   });
   if (projectId) place.push(env.DB.prepare("UPDATE jobs SET project_id = ?, parts = ? WHERE status = 'Completed' AND id IN (SELECT value FROM json_each(?))").bind(projectId, parts, JSON.stringify(done.map((r) => r.id))));
-  return { park, place, info: { customer: o.quote.cname, ids, days: days.map((d) => atMin(d.date, d.s)), parts, total } };
+  return { park, place, info: { customer: o.quote.cname, ids, projectId, days: days.map((d) => atMin(d.date, d.s)), parts, total } };
 }
 /** Re-spread a job's remaining days (after changing men or hours), or add another day to it. */
 async function reflowJob(env, me, jid, action, body) {
   const j = await env.DB.prepare("SELECT * FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(jid).first();
   if (!j) fail(404, 'That job was not found.');
   const rows = j.project_id ? (await env.DB.prepare("SELECT * FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(j.project_id).all()).results : [j];
-  const open = rows.filter((r) => r.status !== 'Completed'), st = await scheduleSettings(env);
+  const open = rows.filter((r) => r.status === 'Scheduled' || r.status === 'In progress'), st = await scheduleSettings(env);
   const quote = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(j.quote_id).first();
   const men = Math.max(1, Math.min(20, parseInt(body.men, 10) || (open[0] || j).men || 2));
   let total = open.reduce((a, r) => a + (+r.man_hours || 0), 0), start, skipFirst = false;
@@ -1052,8 +1058,28 @@ async function reflowJob(env, me, jid, action, body) {
   else { start = atMin(rows[rows.length - 1].start.slice(0, 10), hmMin(st.dayStart)); skipFirst = true; } // every day is done: book the next free working day
   const r = await flowProject(env, st, { quote, rows, start, crew: (open[0] || j).crew, men, totalMH: total, travel: open[0] ? open[0].travel_minutes : 0, seq: open[0] ? open[0].sequence || 0 : 0, moves: [], skipFirst });
   await env.DB.batch(r.park.concat(r.place));
+  await renumber(env, r.info.projectId);
   await audit(env, me, 'job', jid, action, r.info);
   return json({ ok: true, flowed: r.info });
+}
+/** Send a day back to the To schedule tray. A day of a multi-day job waits there with its man-hours; a one-day job is
+    unscheduled (its quote goes back to the tray). */
+async function parkJob(env, me, jid) {
+  const j = await env.DB.prepare("SELECT * FROM jobs WHERE id = ? AND status IN ('Scheduled','In progress')").bind(jid).first();
+  if (!j) fail(404, 'That job was not found — reload the schedule.');
+  if (j.project_id && j.parts > 1) {
+    await env.DB.prepare("UPDATE jobs SET status = 'Unscheduled', travel_minutes = 0, updated_at = datetime('now') WHERE id = ?").bind(jid).run();
+    await renumber(env, j.project_id);
+  } else await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(jid).run();
+  await audit(env, me, 'job', jid, 'park', {});
+  return json({ ok: true, parked: !!(j.project_id && j.parts > 1) });
+}
+/** Number a job's days in date order (days waiting in the tray last): "Day 2 of 3". */
+async function renumber(env, pid) {
+  if (!pid) return;
+  const rows = (await env.DB.prepare("SELECT id, status, start FROM jobs WHERE project_id = ? AND status != 'Cancelled'").bind(pid).all()).results;
+  rows.sort((a, b) => ((a.status === 'Unscheduled') - (b.status === 'Unscheduled')) || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  if (rows.length) await env.DB.batch(rows.map((r, i) => env.DB.prepare('UPDATE jobs SET part = ?, parts = ? WHERE id = ?').bind(i + 1, rows.length, r.id)));
 }
 /** End-of-day check-in for one day of a multi-day job. */
 async function checkinJob(env, me, jid, body) {
@@ -1071,7 +1097,7 @@ async function checkinJob(env, me, jid, body) {
     .bind(JSON.stringify(log), men, log.workingMH, now, now, jid).run();
   const rows = j.project_id ? (await env.DB.prepare("SELECT id, start, status, man_hours, day_log FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(j.project_id).all()).results : [];
   const doneMH = rows.reduce((a, r) => a + (r.day_log ? parseJson(r.day_log, {}).workingMH || 0 : 0), 0);
-  const open = rows.filter((r) => r.status !== 'Completed'), bookedMH = open.reduce((a, r) => a + (+r.man_hours || 0), 0);
+  const open = rows.filter((r) => r.status === 'Scheduled' || r.status === 'In progress').sort((a, b) => (a.start < b.start ? -1 : 1)), bookedMH = rows.filter((r) => r.status !== 'Completed').reduce((a, r) => a + (+r.man_hours || 0), 0);
   const needMH = Math.round(doneMH * (100 - progress) / progress * 100) / 100;
   await audit(env, me, 'job', jid, 'checkin', log);
   return json({ ok: true, log, doneMH: Math.round(doneMH * 100) / 100, needMH, bookedMH: Math.round(bookedMH * 100) / 100, next: open[0] ? { id: open[0].id, start: open[0].start } : null });
@@ -1102,7 +1128,7 @@ async function closeoutJob(env, me, jid, body) {
     .bind(cid, jid, q.id, date, arrived, finished, men, breaks, onsiteMH, workingMH, plan.estimate || null, str(body.access, 20) || null, numOrNull(body.wasteM3), body.pickerUsed == null ? null : body.pickerUsed ? 1 : 0, str(body.notes, 2000),
       JSON.stringify({ issues: Array.isArray(body.issues) ? body.issues.map((x) => str(x, 40)).slice(0, 10) : [], weather: str(body.weather, 40), days: earlier.length + 1, earlierWorkingMH: Math.round(prevWorking * 100) / 100 }), me.id));
   if (j.project_id) { // this is the last day: any later days still booked are no longer needed
-    stmts.push(env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND part > ? AND status IN ('Scheduled','In progress')").bind(j.project_id, j.part));
+    stmts.push(env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND id != ? AND status IN ('Scheduled','In progress','Unscheduled') AND (part > ? OR status = 'Unscheduled')").bind(j.project_id, jid, j.part));
     stmts.push(env.DB.prepare("UPDATE jobs SET parts = ? WHERE project_id = ? AND status != 'Cancelled'").bind(j.part, j.project_id));
   }
   rows.filter((r) => r.actual > 0 || r.est > 0).forEach((r) => stmts.push(env.DB.prepare('INSERT INTO task_times (id, job_id, work_date, category, service, name, unit, qty, tier, height, condition, est_man_hours, actual_man_hours, men) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')

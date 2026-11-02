@@ -38,6 +38,11 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    the rest goes onto the crew's next working days (set under ⚙; weekends off by default), fitted around other jobs.
    Each day shows "Day 2/3". Moving day 1 moves the whole job; moving a later day moves just that day; more men or fewer
    man-hours re-spread the days still to do; **Add another day** extends it. Unscheduling removes every day still to do.
+   Drag any day onto the **To schedule** tray (or use **Send day back** in the job window) to take it off the calendar; it
+   waits there with its man-hours until it is dragged onto a day again.
+   **Day / Week / Month** views, with − / + zoom on the day and week views. Each day shows its total value, man-hours and
+   jobs along the bottom (a job split over days shares its price by man-hours). In Month, drag a job onto another day or
+   tap a date to open that day.
 
 7. **Close out** each job from its **job page** (Schedule › tap the job, or Overview › To close out) — a full-screen,
    one-question-at-a-time flow built for the phone: start and finish times, people, breaks, then how long each kind of
@@ -118,6 +123,6 @@ Passwords are salted PBKDF2 hashes and sessions are stored as token hashes; 10 w
 npx wrangler d1 execute seedsmans --local --file schema/existing.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0004_property_location.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0005_site_drawings.sql
-# …and each later migration in order (0006, 0007, 0008)
+# …and each later migration in order (0006 – 0009)
 npx wrangler dev
 ```

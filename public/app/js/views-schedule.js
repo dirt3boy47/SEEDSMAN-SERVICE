@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   var icon = App.icon, esc = App.esc, money = App.money;
-  var HOUR = 56, SNAP = 15, STATUSES = ['Scheduled', 'In progress', 'Completed', 'Cancelled'];
+  var HOUR = 56, ZOOMS = [26, 38, 56, 76], SNAP = 15, STATUSES = ['Scheduled', 'In progress', 'Completed', 'Cancelled'];
   var D2R = Math.PI / 180;
 
   // ---------------- time helpers (local wall-clock, 'YYYY-MM-DDTHH:MM') ----------------
@@ -20,9 +20,16 @@
   function clock(min) { var h = Math.floor(min / 60) % 24, m = Math.round(min % 60); return (h % 12 || 12) + (m ? ':' + String(m).padStart(2, '0') : '') + (h < 12 ? 'am' : 'pm'); }
   function dur(min) { var h = Math.floor(min / 60), m = Math.round(min % 60); return (h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : h ? '' : '0 min'); }
   function ceilTo(n, step) { return Math.ceil(n / step - 1e-9) * step; }
+  function firstOfMonth(dateKey) { return dateKey.slice(0, 8) + '01'; }
+  function addMonths(dateKey, n) { var d = new Date(firstOfMonth(dateKey) + 'T00:00:00'); d.setMonth(d.getMonth() + n); return iso(d); }
+  function pref(k, v) { try { if (v === undefined) return localStorage.getItem('seedsman-cal-' + k); localStorage.setItem('seedsman-cal-' + k, v); } catch (e) { return null; } }
 
   App.route('/schedule', 'schedule', function (ctx) {
-    var S = { start: monday(ctx.query.date || iso(new Date())), days: 7, jobs: [], waiting: [], settings: null, depot: null, crew: 'Crew 1', crews: ['Crew 1'], road: {}, provider: 'osrm' };
+    var S = { start: monday(ctx.query.date || iso(new Date())), days: 7, jobs: [], waiting: [], parked: [], settings: null, depot: null, crew: 'Crew 1', crews: ['Crew 1'], road: {}, provider: 'osrm',
+      view: ['day', 'week', 'month'].indexOf(pref('view')) >= 0 ? pref('view') : 'week' };
+    HOUR = ZOOMS.indexOf(+pref('zoom')) >= 0 ? +pref('zoom') : 56;
+    if (S.view === 'month') S.start = firstOfMonth(ctx.query.date || iso(new Date()));
+    else if (S.view === 'day') S.start = ctx.query.date || iso(new Date());
     App.me().then(function (me) { S.provider = ((me.business || {}).routing || {}).provider || 'osrm'; });
     var el = ctx.el, drag = null;
     el.className = 'wide';
@@ -81,8 +88,11 @@
       return { id: j.id, quote_id: j.quote_id, quote_number: j.quote_number, customer: j.customer, phone: j.phone, address: j.address, suburb: j.suburb, lat: j.lat, lng: j.lng,
         crew: j.crew, men: j.men || j.crew_size || 2, manHours: j.work_hours != null ? +j.work_hours : null, date: s.date, startMin: s.min, endMin: e.date === s.date ? e.min : e.min + 1440,
         travel: j.travel_minutes || 0, status: j.status, total: j.total, services: j.services, notes: j.notes, actual: j.actual_hours,
-        project: j.project_id, part: j.part || 1, parts: j.parts || 1, head: j.project_head, openHours: j.project_open_hours != null ? +j.project_open_hours : null };
+        project: j.project_id, part: j.part || 1, parts: j.parts || 1, head: j.project_head, openHours: j.project_open_hours != null ? +j.project_open_hours : null, projectHours: j.project_hours != null ? +j.project_hours : null };
     }
+    /** A day's share of the job's price: a job split over days is shared out by man-hours, so it isn't counted twice. */
+    function value(j) { return j.parts > 1 && j.projectHours && j.manHours ? (+j.total || 0) * j.manHours / j.projectHours : +j.total || 0; }
+    function dayTotals(d) { var list = S.jobs.filter(function (j) { return j.date === d; }); return { n: list.length, value: list.reduce(function (a, j) { return a + value(j); }, 0), mh: list.reduce(function (a, j) { return a + (j.manHours || 0); }, 0) }; }
     function group(date, crew, except) { return S.jobs.filter(function (j) { return j.date === date && j.crew === crew && j !== except; }).sort(function (a, b) { return a.startMin - b.startMin; }); }
     /** Lay out one crew's day. Each job keeps its chosen start unless it would overlap the previous job plus the drive;
         jobs that sat straight after the previous one (attached) stay attached. */
@@ -128,59 +138,86 @@
     }
 
     // ---------------- loading ----------------
+    /** First day shown and how many: a week (or as many days as fit), one day, or the weeks covering a month. */
+    function span() {
+      if (S.view === 'month') { var a = monday(S.start), last = addDays(addMonths(S.start, 1), -1), n = 0; while (addDays(a, n) <= last) n += 7; return { from: a, days: n }; }
+      return { from: S.start, days: S.view === 'day' ? 1 : 7 };
+    }
     function load() {
       if (!el.isConnected) return Promise.resolve();
-      var to = addDays(S.start, 7);
-      return App.get('schedule?from=' + S.start + 'T00:00&to=' + to + 'T00:00').then(function (d) {
+      var sp = span(), to = addDays(sp.from, sp.days);
+      return App.get('schedule?from=' + sp.from + 'T00:00&to=' + to + 'T00:00').then(function (d) {
         if (!el.isConnected) return;
-        S.settings = d.settings; S.depot = d.depot; S.waiting = d.waiting;
+        S.settings = d.settings; S.depot = d.depot; S.waiting = d.waiting; S.parked = (d.parked || []).map(fromServer);
         S.jobs = d.jobs.map(fromServer);
         var crews = {}; S.jobs.forEach(function (j) { crews[j.crew] = 1; }); S.crews.forEach(function (c) { crews[c] = 1; });
         S.crews = Object.keys(crews).sort();
         render();
-        ensureBaseRoads();
+        if (S.view !== 'month') ensureBaseRoads(); // month view has no drive blocks — don't ask for dozens of routes
       }).catch(function (e) { App.toast(e.message, 'err'); });
     }
 
     // ---------------- rendering ----------------
     function top() {
       var end = addDays(S.start, S.days - 1), a = new Date(S.start + 'T00:00:00'), b = new Date(end + 'T00:00:00');
-      App.setTop({ el: el, title: 'Schedule', sub: a.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) + (S.days > 1 ? ' – ' + b.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : ', ' + a.getFullYear()),
+      var sub = S.view === 'month' ? a.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) : S.days > 1 ? a.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) + ' – ' + b.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : a.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      App.setTop({ el: el, title: 'Schedule', sub: sub,
         actions: '<button class="ib" id="prev" title="Back">' + icon('back') + '</button><button class="btn sm" id="today">Today</button><button class="ib" id="next" title="Forward">' + icon('chev') + '</button>' +
           '<button class="ib" id="sset" title="Working day and travel">' + icon('gear') + '</button>' });
-      document.getElementById('prev').onclick = function () { S.start = addDays(S.start, -S.days); load(); };
-      document.getElementById('next').onclick = function () { S.start = addDays(S.start, S.days); load(); };
-      document.getElementById('today').onclick = function () { S.start = S.days === 7 ? monday(iso(new Date())) : iso(new Date()); load(); };
+      document.getElementById('prev').onclick = function () { S.start = S.view === 'month' ? addMonths(S.start, -1) : addDays(S.start, -S.days); load(); };
+      document.getElementById('next').onclick = function () { S.start = S.view === 'month' ? addMonths(S.start, 1) : addDays(S.start, S.days); load(); };
+      document.getElementById('today').onclick = function () { var t = iso(new Date()); S.start = S.view === 'month' ? firstOfMonth(t) : S.view === 'week' && S.days === 7 ? monday(t) : t; renderCal.scrolled = false; load(); };
       document.getElementById('sset').onclick = settingsModal;
     }
     function render() {
       if (!el.isConnected) return;
       if (!el.querySelector('.sched')) {
-        el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><span class="muted small" id="wk-sum"></span><a class="link small" href="#/settings" id="no-base" hidden>Set your home base to show the drive out and back</a><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div></div>' +
+        el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><div class="seg sm" id="cal-view">' + [['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(function (v) { return '<button type="button" data-v="' + v[0] + '">' + v[1] + '</button>'; }).join('') + '</div>' +
+          '<span class="zoom" id="zoom"><button class="ib sm" data-z="-1" title="Zoom out — see more of the day">−</button><button class="ib sm" data-z="1" title="Zoom in">+</button></span><span class="muted small" id="wk-sum"></span><a class="link small" href="#/settings" id="no-base" hidden>Set your home base to show the drive out and back</a><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div><div class="cal-foot" id="cal-foot"></div></div>' +
           '<aside class="card tray"><div class="card-h"><h2>To schedule <span class="tag" id="tray-n"></span></h2><button class="btn sm" id="tray-add" title="Accept a draft or sent quote">' + icon('plus') + 'Add</button></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
         el.querySelector('#crew-sel').onchange = function (e) {
           if (e.target.value === '__new') { var n = prompt('Name of the new crew:', 'Crew ' + (S.crews.length + 1)); if (n) { S.crews.push(n.trim()); S.crew = n.trim(); } renderCrews(); return; }
           S.crew = e.target.value;
         };
         el.querySelector('#tray-add').onclick = addAccepted;
-        el.querySelector('#cal-body').addEventListener('scroll', function () { el.querySelector('#cal-head').scrollLeft = el.querySelector('#cal-body').scrollLeft; });
+        el.querySelector('#cal-body').addEventListener('scroll', function () { var x = el.querySelector('#cal-body').scrollLeft; el.querySelector('#cal-head').scrollLeft = x; el.querySelector('#cal-foot').scrollLeft = x; });
+        el.querySelector('#cal-view').onclick = function (e) { var b = e.target.closest('[data-v]'); if (b) setView(b.getAttribute('data-v')); };
+        el.querySelector('#zoom').onclick = function (e) {
+          var b = e.target.closest('[data-z]'); if (!b) return;
+          var i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(HOUR) + +b.getAttribute('data-z'))); if (ZOOMS[i] === HOUR) return;
+          HOUR = ZOOMS[i]; pref('zoom', HOUR); renderCal.scrolled = false; renderCal();
+        };
       }
-      var fit = daysFit();
-      if (fit !== S.days) { S.days = fit; if (fit === 7) S.start = monday(S.start); else if (S.focus) { S.start = S.focus; } }
+      if (S.view === 'week') { var fit = daysFit(); if (fit !== S.days) { S.days = fit; if (fit === 7) S.start = monday(S.start); else if (S.focus) { S.start = S.focus; } } }
+      else S.days = S.view === 'day' ? 1 : span().days;
       S.focus = null;
+      el.querySelectorAll('#cal-view [data-v]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === S.view); });
+      el.querySelector('#zoom').hidden = S.view === 'month';
       top(); renderCrews(); renderTray(); renderCal();
+    }
+    function setView(v) {
+      if (v === S.view) return;
+      var t = iso(new Date()), sp = span(), inView = t >= sp.from && t < addDays(sp.from, sp.days), anchor = inView ? t : S.view === 'month' ? S.start : S.start;
+      S.view = v; pref('view', v); renderCal.scrolled = false;
+      S.start = v === 'month' ? firstOfMonth(anchor) : v === 'day' ? anchor : monday(anchor);
+      load();
     }
     function renderCrews() {
       var sel = el.querySelector('#crew-sel');
       sel.innerHTML = S.crews.map(function (c) { return '<option' + (c === S.crew ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '<option value="__new">+ New crew…</option>';
     }
     function renderTray() {
-      el.querySelector('#tray-n').textContent = S.waiting.length;
-      el.querySelector('#tray').innerHTML = S.waiting.length ? S.waiting.map(function (q) {
+      el.querySelector('#tray-n').textContent = S.waiting.length + S.parked.length;
+      var parkedHtml = S.parked.map(function (j) {
+        var t = ceilTo((j.manHours || 1) / Math.max(1, j.men) * 60, SNAP);
+        return '<div class="tcard parked" data-pj="' + esc(j.id) + '"><span class="grip" title="Drag onto the calendar">' + icon('grip') + '</span><div class="grow"><b><span class="daytag">Day ' + j.part + '/' + j.parts + '</span>' + esc(j.customer) + '</b><small>' + esc(j.suburb || j.address) + ' · ' + esc(j.quote_number) + '</small>' +
+          '<div class="tmeta"><span class="tag">' + (Math.round((j.manHours || 0) * 100) / 100) + ' man-h</span><span class="tag">' + j.men + ' men → ' + dur(t) + '</span><span class="tag info">Waiting for a day</span></div></div><b class="num">' + money(value(j), 0) + '</b></div>';
+      }).join('');
+      el.querySelector('#tray').innerHTML = parkedHtml + (S.waiting.length ? S.waiting.map(function (q) {
         var men = q.crew_size || 2, mh = +q.man_hours || 0, t = ceilTo(mh / men * 60, SNAP);
         return '<div class="tcard' + (ctx.query.quote === q.id ? ' flash' : '') + '" data-q="' + esc(q.id) + '"><span class="grip" title="Drag onto the calendar">' + icon('grip') + '</span><div class="grow"><b>' + esc(q.customer) + '</b><small>' + esc(q.suburb || q.address) + ' · ' + esc(q.number) + '</small>' +
           '<small>' + esc((q.services || 'Hedge trimming').replace(/,/g, ', ')) + '</small><div class="tmeta"><span class="tag">' + (mh ? mh + ' man-h' : 'No estimate') + '</span><span class="tag">' + men + ' men → ' + dur(t || 60) + '</span>' + (daysFor(mh, men) > 1 ? '<span class="tag info">' + daysFor(mh, men) + ' days</span>' : '') + (+q.picker ? '<span class="tag warn">Cherry picker</span>' : '') + (q.lat == null ? '<span class="tag warn">No pin</span>' : '') + '</div></div><b class="num">' + money(q.total, 0) + '</b></div>';
-      }).join('') : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>Nothing waiting</b>Accepted quotes appear here, ready to drag onto the calendar. Tap <b>Add</b> to accept a quote the customer said yes to.</div>';
+      }).join('') : parkedHtml ? '' : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>Nothing waiting</b>Accepted quotes appear here, ready to drag onto the calendar. Tap <b>Add</b> to accept a quote the customer said yes to. Drag a day of a job here to take it off the calendar.</div>');
       if (ctx.query.quote) { var f = el.querySelector('.tcard.flash'); if (f) { f.scrollIntoView({ block: 'center' }); App.toast('Drag ' + f.querySelector('b').textContent + ' onto a day to book it.'); } ctx.query.quote = null; }
     }
     // ---------------- drives from and back to the home base ----------------
@@ -216,6 +253,7 @@
     }
 
     function renderCal() {
+      if (S.view === 'month') return renderMonth();
       // the calendar starts early enough to show the earliest drive from base
       S.minFrom = null;
       var cds = crewDays(), drives = {};
@@ -227,7 +265,7 @@
       el.querySelector('#cal-head').innerHTML = '<div class="cal-row" style="' + cols + '"><div></div>' + days.map(function (d) {
         var list = S.jobs.filter(function (j) { return j.date === d; }), dt = new Date(d + 'T00:00:00');
         var late = list.filter(function (j) { return j.endMin > hm(st.dayEnd); }).length, hours = list.reduce(function (s, j) { return s + (j.manHours || 0); }, 0);
-        list.forEach(function (j) { total += +j.total || 0; mh += j.manHours || 0; });
+        list.forEach(function (j) { total += value(j); mh += j.manHours || 0; });
         var leaves = Object.keys(drives).filter(function (k) { return k.indexOf(d + '|') === 0 && drives[k] && drives[k].out; }).map(function (k) { return drives[k].out.leave; });
         var leave = leaves.length ? Math.min.apply(null, leaves) : null;
         return '<div class="cal-dh' + (d === today ? ' today' : '') + '"><div><span>' + dt.toLocaleDateString('en-AU', { weekday: 'short' }) + '</span> <b>' + dt.getDate() + '</b></div>' +
@@ -269,9 +307,37 @@
         });
         return html + '</div>';
       }).join('') + '</div>';
+      // totals for each day under the grid
+      el.querySelector('#cal-foot').hidden = false;
+      el.querySelector('#cal-foot').innerHTML = '<div class="cal-row" style="' + cols + '"><div class="cal-ft-l">Day total</div>' + days.map(function (d) {
+        var t = dayTotals(d); return '<div class="cal-ft' + (d === today ? ' today' : '') + '">' + (t.n ? '<b>' + money(t.value, 0) + '</b><small>' + Math.round(t.mh * 10) / 10 + ' man-h · ' + t.n + ' job' + (t.n === 1 ? '' : 's') + '</small>' : '<small>—</small>') + '</div>';
+      }).join('') + '</div>';
       var cb = el.querySelector('#cal-body'), keep = cb.scrollTop;
       cb.innerHTML = body;
       if (!renderCal.scrolled) { cb.scrollTop = (hm(st.dayStart) - r.from) / 60 * HOUR - 10; renderCal.scrolled = true; } else cb.scrollTop = keep;
+    }
+
+    /** Month: one cell per day with its jobs and total; drag onto a day, tap a date to open that day. */
+    function renderMonth() {
+      var sp = span(), today = iso(new Date()), month = S.start.slice(0, 7), total = 0, mh = 0, n = 0;
+      el.querySelector('#cal-head').innerHTML = '<div class="cal-row mrow">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (d) { return '<div class="mdh">' + d + '</div>'; }).join('') + '</div>';
+      var html = '<div class="mgrid">';
+      for (var i = 0; i < sp.days; i++) {
+        var d = addDays(sp.from, i), list = S.jobs.filter(function (j) { return j.date === d; }).sort(function (a, b) { return a.crew < b.crew ? -1 : a.crew > b.crew ? 1 : a.startMin - b.startMin; }), t = dayTotals(d);
+        if (d.slice(0, 7) === month) { total += t.value; mh += t.mh; n += t.n; }
+        html += '<div class="mcell' + (d.slice(0, 7) !== month ? ' other' : '') + (d === today ? ' today' : '') + '" data-date="' + d + '"><button class="mday" data-day="' + d + '" title="Open this day">' + new Date(d + 'T00:00:00').getDate() + '</button><div class="mjobs">' +
+          list.map(function (j) { return '<div class="mchip s-' + j.status.toLowerCase().replace(/\s+/g, '-') + '" data-j="' + esc(j.id) + '">' + (j.parts > 1 ? '<span class="daytag">' + j.part + '/' + j.parts + '</span>' : '') + '<span class="mt">' + clock(j.startMin) + '</span> ' + esc(j.customer) + '</div>'; }).join('') +
+          '</div>' + (t.n ? '<div class="mtot"><b class="full">' + money(t.value, 0) + '</b><b class="short">' + (t.value >= 1000 ? '$' + (Math.round(t.value / 100) / 10) + 'k' : money(t.value, 0)) + '</b><span> · ' + Math.round(t.mh * 10) / 10 + ' h</span></div>' : '') + '</div>';
+      }
+      el.querySelector('#cal-body').innerHTML = html + '</div>';
+      el.querySelector('#cal-foot').hidden = true;
+      el.querySelector('#no-base').hidden = true;
+      el.querySelector('#wk-sum').textContent = n + ' job' + (n === 1 ? '' : 's') + ' this month · ' + Math.round(mh * 10) / 10 + ' man-hours · ' + money(total, 0) + ' incl. GST';
+    }
+    /** Where a job dropped on a day in month view goes: after the crew's last job that day, or the start of the day. */
+    function appendMin(date, crew, except) {
+      var list = group(date, crew, except); if (!list.length) return hm(settings().dayStart);
+      var last = list[list.length - 1]; return ceilTo(last.endMin + 30, SNAP);
     }
 
     // ---------------- drag and drop (mouse, finger and pencil) ----------------
@@ -296,7 +362,12 @@
       if (e.clientY < rb.top + 40) cb.scrollTop -= 12; else if (e.clientY > rb.bottom - 40) cb.scrollTop += 12;
       var under = document.elementFromPoint(e.clientX, e.clientY), col = under && under.closest('.cal-col');
       if (drag.preview) { drag.preview.remove(); drag.preview = null; }
+      el.querySelectorAll('.drop-on').forEach(function (x) { x.classList.remove('drop-on'); });
       drag.drop = null;
+      var tray = drag.info.job && under && under.closest('.tray');
+      if (tray) { tray.classList.add('drop-on'); drag.drop = { tray: true }; return; }
+      var cell = under && under.closest('.mcell');
+      if (cell) { cell.classList.add('drop-on'); drag.drop = { date: cell.getAttribute('data-date'), min: null }; return; }
       if (!col) return;
       var r = range(), cr = col.getBoundingClientRect(), y = e.clientY - cr.top - (drag.info.grabY || 0);
       var min = Math.max(r.from, Math.min(r.to - SNAP, r.from + Math.round(y / HOUR * 60 / SNAP) * SNAP));
@@ -310,23 +381,32 @@
       if (!drag || e.pointerId !== drag.id) return;
       var d = drag; drag = null;
       if (d.ghost) d.ghost.remove(); if (d.preview) d.preview.remove();
+      el.querySelectorAll('.drop-on').forEach(function (x) { x.classList.remove('drop-on'); });
       document.body.classList.remove('dragging'); d.src.classList.remove('lifted');
       if (!d.moved) { if (d.info.job) jobModal(d.info.job); return; }
       if (e.type === 'pointercancel' || !d.drop) return;
-      if (d.info.job) moveJob(d.info.job, d.drop.date, d.drop.min); else bookQuote(d.info.quote, d.drop.date, d.drop.min);
+      if (d.drop.tray) return sendBack(d.info.job);
+      var min = d.drop.min;
+      if (min == null) min = d.info.job ? d.info.job.startMin : appendMin(d.drop.date, S.crew); // month view keeps the time / goes after the day's jobs
+      if (d.info.job) moveJob(d.info.job, d.drop.date, min); else if (d.info.parked) placeParked(d.info.parked, d.drop.date, min); else bookQuote(d.info.quote, d.drop.date, min);
     }
     el.addEventListener('pointerdown', function (e) {
       var card = e.target.closest('.tcard');
       if (card) {
         if (e.pointerType === 'touch' && !e.target.closest('.grip')) return; // on touch screens the grip drags, the rest scrolls the list
+        if (card.hasAttribute('data-pj')) {
+          var pj = S.parked.filter(function (x) { return x.id === card.getAttribute('data-pj'); })[0];
+          startDrag(e, { parked: pj, label: pj.customer + ' · day ' + pj.part, dur: ceilTo((pj.manHours || 1) / Math.max(1, pj.men) * 60, SNAP), grabY: 0 }, card);
+          return;
+        }
         var q = S.waiting.filter(function (x) { return x.id === card.getAttribute('data-q'); })[0];
         startDrag(e, { quote: q, label: q.customer, dur: ceilTo((+q.man_hours || 1) / (q.crew_size || 2) * 60, SNAP) || 60, grabY: 0 }, card);
         return;
       }
-      var jb = e.target.closest('.cal-job');
+      var jb = e.target.closest('.cal-job, .mchip');
       if (jb) {
         var j = S.jobs.filter(function (x) { return x.id === jb.getAttribute('data-j'); })[0];
-        startDrag(e, { job: j, label: j.customer + (j.parts > 1 ? ' · day ' + j.part : ''), dur: j.endMin - j.startMin, grabY: e.clientY - jb.getBoundingClientRect().top }, jb);
+        startDrag(e, { job: j, label: j.customer + (j.parts > 1 ? ' · day ' + j.part : ''), dur: j.endMin - j.startMin, grabY: jb.classList.contains('mchip') ? 0 : e.clientY - jb.getBoundingClientRect().top }, jb);
       }
     });
     window.addEventListener('pointermove', onMove);
@@ -335,7 +415,10 @@
     function onResize() { if (el.isConnected && daysFit() !== S.days) render(); }
     window.addEventListener('resize', onResize);
     ctx.onLeave(function () { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp); window.removeEventListener('resize', onResize); document.body.classList.remove('dragging'); });
-    el.addEventListener('click', function (e) { var r = e.target.closest('[data-route]'); if (r) routeModal(r.getAttribute('data-route')); });
+    el.addEventListener('click', function (e) {
+      var r = e.target.closest('[data-route]'); if (r) routeModal(r.getAttribute('data-route'));
+      var dy = e.target.closest('[data-day]'); if (dy) { S.view = 'day'; pref('view', 'day'); S.start = dy.getAttribute('data-day'); renderCal.scrolled = false; load(); }
+    });
 
     // ---------------- actions ----------------
     function bookQuote(q, date, min) {
@@ -348,6 +431,24 @@
         var moved = nj.startMin !== min ? ' (moved to ' + clock(nj.startMin) + ' to fit the ' + nj.travel + ' min drive from the job before)' : '';
         apply(list, q.customer + ' booked ' + new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + clock(nj.startMin) + moved + '.');
       });
+    }
+    /** A day of a job that was sent back to the tray goes onto the calendar again. */
+    function placeParked(pj, date, min) {
+      var crew = S.crew, list = group(date, crew);
+      markAttached(list);
+      var nj = Object.assign({}, pj, { crew: crew, date: date, startMin: min, endMin: min + 60, desired: min, attached: false, status: 'Scheduled' });
+      list.push(nj);
+      ensureRoads([list]).then(function () { arrange(list); apply(list, pj.customer + ' day booked ' + new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + clock(nj.startMin) + '.'); });
+    }
+    /** Take a day off the calendar and put it in the tray (a one-day job goes back as its quote). */
+    function sendBack(j) {
+      if (j.status === 'Completed') { App.toast('That day is already done.', 'warn'); return; }
+      var rest = group(j.date, j.crew).filter(function (x) { return x !== j; }); markAttached(rest);
+      App.post('jobs/' + j.id + '/park', {}).then(function (r) {
+        S.jobs = S.jobs.filter(function (x) { return x !== j; });
+        App.toast(r.parked ? j.customer + ' day ' + j.part + ' is back in To schedule — drag it onto any day.' : j.customer + ' is back in To schedule.');
+        return ensureRoads([rest]).then(function () { arrange(rest); return apply(rest); });
+      }).catch(function (x) { App.toast(x.message, 'err'); load(); });
     }
     /** Move or change a job: work out which jobs follow which first, then lay out the old and the new crew-day. */
     function relayout(j, changes) {
@@ -386,6 +487,7 @@
         (j.travel ? '<p class="muted small">' + j.travel + ' min from the crew’s previous job, including ' + settings().bufferMinutes + ' min to park' + (j.travelInfo && j.travelInfo.low != null ? ' (drive ' + j.travelInfo.low + '–' + j.travelInfo.high + ' min, ' + (j.travelInfo.source === 'google' ? 'Google traffic' : 'by road') + ')' : '') + (j.guess ? ' (estimated — a property has no house pin)' : '') + '.</p>' : '') +
         '<div class="actions"><a class="btn" href="#/jobs/' + esc(j.id) + '">' + icon('check') + (j.status === 'Completed' ? 'Job page' : proj && j.part < j.parts ? 'Check in / photos' : 'Close out / photos') + '</a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
         (j.status !== 'Completed' ? '<button class="btn" id="j-day">' + icon('plus') + 'Add another day</button>' : '') +
+        (proj && j.status !== 'Completed' ? '<button class="btn" id="j-park">Send day ' + j.part + ' back to To schedule</button>' : '') +
         '<button class="btn ghost" id="j-un" style="color:var(--danger)">Unschedule</button><span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="j-ok">Save</button></div>', { noFocus: true });
       var men = j.men, q = function (id) { return m.el.querySelector('#' + id); };
       function upd() {
@@ -403,6 +505,7 @@
           App.del('jobs/' + j.id).then(function () { S.jobs = S.jobs.filter(function (x) { return x !== j; }); return ensureRoads([rest]); }).then(function () { arrange(rest); return apply(rest, 'Unscheduled — it is back in To schedule.'); });
         });
       };
+      var parkBtn = q('j-park'); if (parkBtn) parkBtn.onclick = function () { m.close(); sendBack(j); };
       var dayBtn = q('j-day');
       if (dayBtn) dayBtn.onclick = function () {
         dayBtn.disabled = true;

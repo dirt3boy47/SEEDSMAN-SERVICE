@@ -413,9 +413,9 @@
           daysCard = '<div class="card"><div class="card-h"><h2>Days</h2><span class="muted small">' + (c ? 'Finished' : pct ? 'About ' + pct + '% done' : 'Not started') + '</span></div><div class="card-b">' +
             '<div class="progress"><i style="width:' + pct + '%"></i></div><p class="muted small" style="margin:0 0 10px">' + mhs(logged) + ' man-hours done' + (booked ? ' · ' + mhs(booked) + ' booked for the days to go' : '') + ' · quoted ' + mhs(plan.estimate) + '</p><div class="days">' +
             days.map(function (x) {
-              var l = x.day_log, dd = new Date(x.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+              var l = x.day_log, dd = x.status === 'Unscheduled' ? 'not booked yet' : new Date(x.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
               return '<a class="dayrow' + (x.status === 'Completed' ? ' done' : '') + (x.id === j.id ? ' cur' : '') + '" href="#/jobs/' + esc(x.id) + '"><span class="dn">' + (x.status === 'Completed' ? icon('check') : x.part) + '</span><span class="grow"><b>Day ' + x.part + ' · ' + dd + '</b><small>' +
-                (l ? 'Checked in · ' + mhs(l.workingMH) + ' man-h · about ' + l.progress + '% done' + (l.notes ? ' · ' + esc(l.notes) : '') : x.status === 'Completed' ? 'Closed out' : clockStr(x.start.slice(11, 16)) + '–' + clockStr(x.end.slice(11, 16)) + ' · ' + mhs(x.man_hours) + ' man-h booked · ' + x.men + ' men') + '</small></span></a>';
+                (l ? 'Checked in · ' + mhs(l.workingMH) + ' man-h · about ' + l.progress + '% done' + (l.notes ? ' · ' + esc(l.notes) : '') : x.status === 'Completed' ? 'Closed out' : x.status === 'Unscheduled' ? 'Waiting in To schedule · ' + mhs(x.man_hours) + ' man-h · ' + x.men + ' men' : clockStr(x.start.slice(11, 16)) + '–' + clockStr(x.end.slice(11, 16)) + ' · ' + mhs(x.man_hours) + ' man-h booked · ' + x.men + ' men') + '</small></span></a>';
             }).join('') + '</div></div></div>';
         }
         ctx.el.innerHTML = '<div class="page"><div class="cols"><div class="stack">' +
