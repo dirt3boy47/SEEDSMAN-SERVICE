@@ -63,10 +63,25 @@
   }
 
   // ---------------- the close-out: a guided, one-question-at-a-time flow (built for iPhone) ----------------
-  function closeout(d, onDone) {
-    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice(), SAVE = 'seedsman-closeout-' + j.id;
-    var conds = [], names = { maintained: 'Well kept — a regular trim', overgrown: 'Overgrown — hadn’t been cut for a while', reduction: 'Very overgrown — a hard cut back' };
-    App.me().then(function (me) { conds = me.rates.conditions; });
+  function closeout(d, onDone) { App.me().then(function (me) { runCloseout(d, onDone, me.rates || {}); }).catch(function (x) { App.toast(x.message, 'err'); }); }
+  // Hedging first, then the other kinds of work, then setup — one time question per group
+  var GROUPS = [['Hedges', 'Hedging', 'all the hedging'], ['Lawns', 'Lawns', 'the lawns'], ['Gardens', 'Garden work', 'the garden work'], ['Trees', 'Tree & shrub work', 'the tree and shrub work'], ['Other', 'Other work', 'the other work']];
+  function groupTasks(tasks, rates) {
+    var svc = {}; ((rates && rates.services) || []).forEach(function (x) { svc[x.id] = x.category; });
+    ((window.SeedsmanPricing && SeedsmanPricing.DEFAULT_SERVICES) || []).forEach(function (x) { if (!svc[x.id]) svc[x.id] = x.category; });
+    function catOf(t) { var c = svc[t.service] || (t.service === 'hedge' ? 'Hedges' : 'Other'); return GROUPS.some(function (x) { return x[0] === c; }) ? c : 'Other'; }
+    var out = GROUPS.map(function (g) {
+      var mem = tasks.filter(function (t) { return t.category !== 'setup' && catOf(t) === g[0]; });
+      return mem.length ? { key: 'g:' + g[0], cat: g[0], name: g[1], phrase: g[2], members: mem, est: mem.reduce(function (a, t) { return a + (t.est || 0); }, 0), hedge: g[0] === 'Hedges' } : null;
+    }).filter(Boolean);
+    tasks.filter(function (t) { return t.category === 'setup'; }).forEach(function (t) { out.push({ key: 'g:setup', cat: 'setup', name: 'Setup & clean-up', phrase: 'setting up, cleaning up and loading', members: [t], est: t.est || 0, setup: true }); });
+    return out;
+  }
+  function runCloseout(d, onDone, rates) {
+    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice(), SAVE = 'seedsman-closeout2-' + j.id;
+    var groups = groupTasks(plan.tasks, rates), groupOf = {};
+    groups.forEach(function (g) { g.members.forEach(function (t) { groupOf[t.key] = g; }); });
+    var conds = rates.conditions || [], names = { maintained: 'Well kept — a regular trim', overgrown: 'Overgrown — hadn’t been cut for a while', reduction: 'Very overgrown — a hard cut back' };
     function toMin(t) { var p = (t || '0:0').split(':'); return +p[0] * 60 + +p[1]; }
     function clock(t) { var m = toMin(t), h = Math.floor(m / 60) % 24, mm = m % 60; return (h % 12 || 12) + (mm ? ':' + String(mm).padStart(2, '0') : '') + (h < 12 ? 'am' : 'pm'); }
     function dur(min) { min = Math.max(0, Math.round(min)); var h = Math.floor(min / 60), m = min % 60; return h && m ? h + ' h ' + m + ' min' : h ? h + (h === 1 ? ' hour' : ' hours') : m + ' min'; }
@@ -86,11 +101,11 @@
         slow: (c.details && c.details.issues && c.details.issues.length) ? c.details.issues : ['Nothing slowed us down'], waste: c.waste_m3 != null ? c.waste_m3 : 0,
         picker: c.picker_used == null ? null : !!c.picker_used, notes: c.notes || '', months: 0, photoSkip: true, extra: false, date: c.work_date || A.date });
       (d.tasks || []).forEach(function (row) {
-        var t = plan.tasks.filter(function (x) { return x.name === row.name && (x.service || null) === (row.service || null); })[0], min = Math.round((row.actual_man_hours || 0) / cm * 60 / 5) * 5;
-        if (t) { A.task[t.key] = min; if (row.condition) A.cond[t.key] = row.condition; }
+        var t = plan.tasks.filter(function (x) { return x.name === row.name && (x.service || null) === (row.service || null); })[0], min = Math.round((row.actual_man_hours || 0) / cm * 60 / 5) * 5, g = t && groupOf[t.key];
+        if (g) { A.task[g.key] = (A.task[g.key] || 0) + min; if (row.condition && g.hedge) A.cond[g.key] = row.condition; }
         else if (row.category === 'other' && !/^Other time/.test(row.name)) A.extra = { name: row.name, min: min };
       });
-      plan.tasks.forEach(function (t) { if (A.task[t.key] == null) A.task[t.key] = 0; if (t.service === 'hedge' && !A.cond[t.key]) A.cond[t.key] = t.condition || 'maintained'; });
+      groups.forEach(function (g) { if (A.task[g.key] == null) A.task[g.key] = 0; if (g.hedge && !A.cond[g.key]) A.cond[g.key] = g.members[0].condition || 'maintained'; });
       resumeAt = -1; // = summary
     }
     function save(i) { try { localStorage.setItem(SAVE, JSON.stringify({ A: A, i: i })); } catch (e) { /* ignore */ } }
@@ -109,12 +124,14 @@
     Q.push({ label: 'People', id: 'men', title: 'How many people worked on this job?', sub: 'Count everyone, including you.', kind: 'number', key: 'men' });
     Q.push({ label: 'Breaks', id: 'breaks', title: 'How long were your breaks, all up?', sub: 'Smoko and lunch together. If everyone stopped at the same time, count it once.', kind: 'choice', key: 'breaks',
       options: [[0, 'No breaks'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [90, '1½ hours']] });
-    plan.tasks.forEach(function (t, ti) {
-      var last = ti === plan.tasks.length - 1;
-      Q.push({ id: 'task:' + t.key, label: t.category === 'setup' ? 'Setup & clean-up' : t.name, kind: 'duration', task: t, last: last,
-        title: t.category === 'setup' ? 'How long did setting up, cleaning up and loading take?' : 'How long did the ' + t.name.toLowerCase() + ' take?',
-        sub: (t.qty != null ? App.qty(t.qty, t.unit) + ' · ' : '') + 'We guessed about ' + dur(q15(estTeam(t))) + '. Answer for the whole team working together.' });
-      if (t.service === 'hedge') Q.push({ id: 'cond:' + t.key, label: t.name + ' — condition', kind: 'condition', task: t, title: 'What was the ' + t.name.toLowerCase() + ' like?', sub: 'This helps us price it right next time.' });
+    groups.forEach(function (g, gi) {
+      var many = g.members.length > 1, units = g.members.map(function (t) { return t.unit; }).filter(Boolean), oneUnit = units.length === g.members.length && units.every(function (u) { return u === units[0]; });
+      var qty = oneUnit ? App.qty(g.members.reduce(function (a, t) { return a + (+t.qty || 0); }, 0), units[0]) : '';
+      Q.push({ id: 'task:' + g.key, label: g.name, kind: 'duration', task: g, last: gi === groups.length - 1,
+        title: 'How long did ' + (g.setup ? g.phrase : many ? g.phrase : 'the ' + g.members[0].name.toLowerCase()) + ' take?',
+        sub: (many ? g.members.map(function (t) { return t.name; }).join(', ') + (qty ? ' (' + qty + ' all up)' : '') + '. ' : qty && !g.setup ? qty + ' · ' : '') + 'We guessed about ' + dur(q15(estTeam(g))) + '. Answer for the whole team working together.' });
+      if (g.hedge) Q.push({ id: 'cond:' + g.key, label: (many ? 'Hedges' : g.members[0].name) + ' — condition', kind: 'condition', task: g,
+        title: many ? 'What were the hedges like?' : 'What was the ' + g.members[0].name.toLowerCase() + ' like?', sub: many ? 'Pick the closest for most of them. This helps us price it right next time.' : 'This helps us price it right next time.' });
     });
     Q.push({ label: 'Extra work', id: 'extra', kind: 'extra', title: 'Did you do any other work that wasn’t on the quote?', sub: 'For example extra pruning or weeding the customer asked for.' });
     Q.push({ label: 'Access', id: 'access', kind: 'choice', key: 'access', title: 'How easy was it to get to?', sub: 'Getting gear in and working around the hedge.', options: [['Easy', 'Easy'], ['Normal', 'Normal'], ['Difficult', 'Hard']] });
@@ -290,7 +307,11 @@
     function finish() {
       var next = el.querySelector('.cx-next'); next.disabled = true; next.textContent = 'Saving…';
       var m = men(), toMH = function (min) { return Math.round(min / 60 * m * 100) / 100; };
-      var tasks = plan.tasks.map(function (t) { return { key: t.key, name: t.name, actual: toMH(A.task[t.key] || 0), condition: A.cond[t.key] || t.condition }; });
+      var tasks = [];
+      groups.forEach(function (g) {
+        var min = A.task[g.key] || 0, est = g.members.reduce(function (a, t) { return a + (t.est || 0); }, 0), qty = g.members.reduce(function (a, t) { return a + (+t.qty || 0); }, 0);
+        g.members.forEach(function (t) { var share = est ? (t.est || 0) / est : qty ? (+t.qty || 0) / qty : 1 / g.members.length; tasks.push({ key: t.key, name: t.name, actual: toMH(min * share), condition: (g.hedge && A.cond[g.key]) || t.condition }); });
+      });
       if (A.extra && A.extra.min) tasks.push({ key: 'extra:work', name: A.extra.name || 'Other work', actual: toMH(A.extra.min) });
       var gap = working() - used(null); if (gap >= 15) tasks.push({ key: 'extra:other', name: 'Other time (not linked to a task)', actual: toMH(gap) });
       App.post('jobs/' + j.id + '/closeout', { date: A.date, arrived: A.arrived, finished: A.finished, men: m, breakMinutes: A.breaks || 0, tasks: tasks,
