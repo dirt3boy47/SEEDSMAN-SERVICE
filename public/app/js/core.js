@@ -50,10 +50,13 @@
   function token() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
   function setToken(t) { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { /* private mode */ } }
   function goLogin() { location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.hash); }
+  // a new version went live while this page was open: load it on the next screen change (nothing unsaved is lost)
+  window.addEventListener('hashchange', function () { if (call.stale) location.reload(); });
   function call(method, path, body) {
     var headers = { 'Content-Type': 'application/json' };
     if (token()) headers.Authorization = 'Bearer ' + token();
     return fetch('/api/' + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined }).then(function (r) {
+      var b = r.headers.get('X-Build'); if (b) { if (!call.build) call.build = b; else if (b !== call.build) call.stale = true; }
       return r.json().catch(function () { return {}; }).then(function (d) {
         if (r.status === 401 && path !== 'auth/login') { setToken(''); goLogin(); throw new Error(d.error || 'Please sign in.'); }
         if (!r.ok) throw new Error(d.error || 'Something went wrong (' + r.status + ').');

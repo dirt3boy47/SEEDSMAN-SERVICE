@@ -12,13 +12,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
+    let res;
     try {
-      return await api(request, env, url);
+      res = await api(request, env, url);
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
-      if (/Crew overlap/.test(String(e && e.message))) return json({ error: 'That crew already has a job booked at that time.' }, 409);
-      return json({ error: 'Server error: ' + (e && e.message ? e.message : String(e)) }, 500);
+      if (e instanceof HttpError) res = json({ error: e.message }, e.status);
+      else if (/Crew overlap/.test(String(e && e.message))) res = json({ error: 'That crew already has a job booked at that time.' }, 409);
+      else res = json({ error: 'Server error: ' + (e && e.message ? e.message : String(e)) }, 500);
     }
+    // which deployment answered: an app page left open from an older version reloads itself (see core.js)
+    const build = env.CF_VERSION_METADATA && env.CF_VERSION_METADATA.id;
+    if (build && res && res.headers && !res.headers.has('X-Build')) { try { res.headers.set('X-Build', build); } catch (x) { res = new Response(res.body, res); res.headers.set('X-Build', build); } }
+    return res;
   }
 };
 
@@ -647,7 +652,15 @@ async function applySchedule(env, me, body) {
   const list = (Array.isArray(body.jobs) ? body.jobs : []).slice(0, 200);
   if (!list.length) fail(400, 'Nothing to schedule.');
   const park = [], place = [], created = [], flows = [], flowed = [];
-  const seenQuotes = {};
+  const seenQuotes = {}, st0 = await scheduleSettings(env), dayLen = hmMin(st0.dayEnd) - hmMin(st0.dayStart);
+  // a one-day job longer than a working day is always spread over days, even if an older app didn't ask for it
+  for (const x of list) {
+    if (x.flow || !LOCAL_DT.test(String(x.start)) || !LOCAL_DT.test(String(x.end))) continue;
+    const len = (new Date(x.end + ':00Z') - new Date(x.start + ':00Z')) / 60000;
+    if (len <= dayLen + 30) continue;
+    if (x.id) { const r = await env.DB.prepare('SELECT parts FROM jobs WHERE id = ?').bind(str(x.id, 40)).first(); if (!r || r.parts > 1) continue; }
+    x.flow = true; if (x.flow_total == null) x.flow_total = numOrNull(x.man_hours) ?? Math.round(len / 60 * (parseInt(x.men, 10) || 2) * 100) / 100;
+  }
   for (const x of list) {
     if (x.flow) { flows.push(x); continue; } // laid out over as many days as it needs, after the rest are known
     const start = str(x.start, 16), end = str(x.end, 16);
@@ -676,7 +689,7 @@ async function applySchedule(env, me, body) {
     }
   }
   if (flows.length) {
-    const st = await scheduleSettings(env);
+    const st = st0;
     const moves = list.filter((x) => !x.flow && x.id).map((x) => ({ id: str(x.id, 40), crew: str(x.crew, 60) || 'Crew 1', start: str(x.start, 16), end: str(x.end, 16) }));
     for (const x of flows) {
       const start = str(x.start, 16), crew = str(x.crew, 60) || 'Crew 1', men = Math.max(1, Math.min(20, parseInt(x.men, 10) || 2));
@@ -985,7 +998,7 @@ function planDays(st, date, startMin, totalMH, men, busy, skipFirst) {
     if (dayE - cur >= need) gaps.push([cur, dayE]);
     gaps.forEach((g2) => { if (!slot || g2[1] - g2[0] > slot[1] - slot[0]) slot = g2; });
     if (!slot) continue;
-    const len = Math.min(left, slot[1] - slot[0]);
+    const len = left <= slot[1] - slot[0] + (slot[1] === dayE ? 30 : 0) ? left : slot[1] - slot[0];
     out.push({ date, s: slot[0], e: slot[0] + len }); left -= len;
   }
   if (left > 0) fail(409, 'There is not enough free time in the next few months to fit this job — make the day longer or add men.');
