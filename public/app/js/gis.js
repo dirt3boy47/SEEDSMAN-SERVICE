@@ -149,9 +149,12 @@
       });
     };
     /** list: [{id, geometry, label, color, dashed, faded}] */
+    var snapPts = [];
     g.setShapes = function (list) {
-      shapes.clearLayers();
-      (list || []).forEach(function (s) {
+      shapes.clearLayers(); snapPts = [];
+      var rank = function (s) { var m = modeOf(s.geometry); return m === 'area' ? -Geo.ringArea(toLatLngs(s.geometry)) : m === 'line' ? 1e12 : 2e12; };
+      (list || []).filter(function (s) { return s.geometry; }).sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (s) {
+        toLatLngs(s.geometry).forEach(function (ll) { snapPts.push(ll); });
         if (!s.geometry) return;
         var lls = toLatLngs(s.geometry), m = modeOf(s.geometry), color = s.color || '#3ddc84', layer;
         if (m === 'point') {
@@ -161,7 +164,7 @@
           shapes.addLayer(mk(lls, { color: '#000', weight: s.faded ? 5 : 8, opacity: s.faded ? 0.25 : 0.4, interactive: false, fill: false }));
           layer = mk(lls, { color: color, weight: s.faded ? 3 : 5, opacity: s.faded ? 0.7 : 1, dashArray: s.dashed ? '6 6' : null, fillColor: color, fillOpacity: m === 'area' ? (s.faded ? 0.12 : 0.25) : 0 });
         }
-        if (opts.onShapeClick && s.id) layer.on('click', function (e) { L.DomEvent.stopPropagation(e); opts.onShapeClick(s.id); });
+        if (opts.onShapeClick && s.id) layer.on('click', function (e) { if (M.on) return; L.DomEvent.stopPropagation(e); opts.onShapeClick(s.id); }); // while drawing, taps go through to the map
         shapes.addLayer(layer);
         if (s.label) shapes.addLayer(label(centreOf(s.geometry), s.label, m === 'area' ? 'mid' : ''));
       });
@@ -214,16 +217,23 @@
       panel.querySelector('.ms-rows').innerHTML = rows.map(function (r, i) { return '<div class="ms-row' + (i ? '' : ' big') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('');
       panel.querySelector('.ms-hint').textContent = M.mode === 'point' ? 'Tap the map to place the point. Drag it to move it.' : M.free
         ? 'Trace with one finger, the mouse or a pencil. Two fingers move the map. Taps add straight bits.'
-        : M.mode === 'area' ? 'Tap the corners of the area. Drag a point to move it.' : 'Tap along the line to add points. Drag a point to move it.';
+        : M.mode === 'area' ? 'Tap the corners of the area — taps snap to nearby corners of other shapes. Drag a point to move it.' : 'Tap along the line to add points — taps snap to nearby corners. Drag a point to move it.';
       panel.querySelectorAll('.seg button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-m') === M.mode); });
       panel.querySelector('.ms-free').hidden = M.mode === 'point';
       panel.querySelector('[data-a=undo]').disabled = panel.querySelector('[data-a=clear]').disabled = !M.pts.length;
       panel.querySelector('[data-a=done]').disabled = M.pts.length < (M.mode === 'area' ? 3 : M.mode === 'line' ? 2 : 1);
     }
+    /** A corner of an existing shape (or of the house pin) within 12 px of the tap, so shapes can share exact corners. */
+    function snap(ll) {
+      var pt = map.latLngToContainerPoint(ll), best = null, bd = 12;
+      snapPts.concat(pin ? [pin.getLatLng()] : []).forEach(function (c) { var d = map.latLngToContainerPoint(c).distanceTo(pt); if (d < bd) { bd = d; best = c; } });
+      return best ? L.latLng(best.lat, best.lng) : null;
+    }
     function onClick(e) {
       if (!M.on || Date.now() - M.lastTrace < 450) return;
-      if (M.mode === 'point') M.pts = [{ ll: e.latlng, h: true, cut: true }];
-      else M.pts.push({ ll: e.latlng, h: true, cut: true });
+      var ll = snap(e.latlng) || e.latlng;
+      if (M.mode === 'point') M.pts = [{ ll: ll, h: true, cut: true }];
+      else M.pts.push({ ll: ll, h: true, cut: true });
       renderLive();
     }
     map.on('click', onClick);

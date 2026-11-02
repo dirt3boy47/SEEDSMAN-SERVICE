@@ -454,3 +454,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .doc-accepted svg.i { width: 26px; height: 26px; }
 .doc-accepted small { display: block; color: #5c6862; }
 .doc-map-in { height: 100%; }
+
+/* while drawing, existing shapes and pins let taps through so new shapes can overlap them */
+.gis.measuring .leaflet-overlay-pane path.leaflet-interactive, .gis.measuring .map-pin, .gis.measuring .leaflet-marker-icon:not(.ms-vertex) { pointer-events: none !important; }

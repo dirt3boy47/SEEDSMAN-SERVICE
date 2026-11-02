@@ -109,11 +109,12 @@
       if (!el.isConnected) return;
       if (!el.querySelector('.sched')) {
         el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><span class="muted small" id="wk-sum"></span><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div></div>' +
-          '<aside class="card tray"><div class="card-h"><h2>To schedule</h2><span class="tag" id="tray-n"></span></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
+          '<aside class="card tray"><div class="card-h"><h2>To schedule <span class="tag" id="tray-n"></span></h2><button class="btn sm" id="tray-add" title="Accept a draft or sent quote">' + icon('plus') + 'Add</button></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
         el.querySelector('#crew-sel').onchange = function (e) {
           if (e.target.value === '__new') { var n = prompt('Name of the new crew:', 'Crew ' + (S.crews.length + 1)); if (n) { S.crews.push(n.trim()); S.crew = n.trim(); } renderCrews(); return; }
           S.crew = e.target.value;
         };
+        el.querySelector('#tray-add').onclick = addAccepted;
         el.querySelector('#cal-body').addEventListener('scroll', function () { el.querySelector('#cal-head').scrollLeft = el.querySelector('#cal-body').scrollLeft; });
       }
       var fit = daysFit();
@@ -131,7 +132,7 @@
         var men = q.crew_size || 2, mh = +q.man_hours || 0, t = ceilTo(mh / men * 60, SNAP);
         return '<div class="tcard' + (ctx.query.quote === q.id ? ' flash' : '') + '" data-q="' + esc(q.id) + '"><span class="grip" title="Drag onto the calendar">' + icon('grip') + '</span><div class="grow"><b>' + esc(q.customer) + '</b><small>' + esc(q.suburb || q.address) + ' · ' + esc(q.number) + '</small>' +
           '<small>' + esc((q.services || 'Hedge trimming').replace(/,/g, ', ')) + '</small><div class="tmeta"><span class="tag">' + (mh ? mh + ' man-h' : 'No estimate') + '</span><span class="tag">' + men + ' men → ' + dur(t || 60) + '</span>' + (+q.picker ? '<span class="tag warn">Cherry picker</span>' : '') + (q.lat == null ? '<span class="tag warn">No pin</span>' : '') + '</div></div><b class="num">' + money(q.total, 0) + '</b></div>';
-      }).join('') : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>All caught up</b>Accepted quotes appear here, ready to drag onto the calendar.</div>';
+      }).join('') : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>Nothing waiting</b>Accepted quotes appear here, ready to drag onto the calendar. Tap <b>Add</b> to accept a quote the customer said yes to.</div>';
       if (ctx.query.quote) { var f = el.querySelector('.tcard.flash'); if (f) { f.scrollIntoView({ block: 'center' }); App.toast('Drag ' + f.querySelector('b').textContent + ' onto a day to book it.'); } ctx.query.quote = null; }
     }
     function renderCal() {
@@ -326,6 +327,29 @@
         });
       });
       setTimeout(function () { gis.map.invalidateSize(); if (bounds.length > 1) gis.map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40] }); else if (bounds.length) gis.map.setView(bounds[0], 15); }, 60);
+    }
+    /** Pick a draft or sent quote the customer has said yes to: it becomes Accepted and joins the tray. */
+    function addAccepted() {
+      App.get('quotes').then(function (d) {
+        var open = d.quotes.filter(function (q) { return q.status === 'Draft' || q.status === 'Sent'; });
+        var m = App.modal('<h2>Add an accepted quote</h2><p class="sub">Choose the quote the customer has accepted. It is marked Accepted and appears in To schedule, ready to drag onto a day.</p>' +
+          '<label class="search">' + icon('search') + '<input class="input" id="aq" type="search" placeholder="Search customer, number or address"></label><div class="list" id="aq-list" style="margin-top:8px;max-height:50vh;overflow:auto"></div>' +
+          '<div class="actions"><a class="btn" href="#/quotes/new">' + icon('plus') + 'New quote</a><span class="spacer"></span><button class="btn" data-close>Close</button></div>');
+        function draw() {
+          var f = m.el.querySelector('#aq').value.toLowerCase();
+          var list = open.filter(function (q) { return !f || (q.customer + ' ' + q.number + ' ' + q.address + ' ' + q.suburb).toLowerCase().indexOf(f) >= 0; });
+          m.el.querySelector('#aq-list').innerHTML = list.length ? list.map(function (q) {
+            return '<button class="li" data-aq="' + esc(q.id) + '"><span class="avatar">' + esc(App.initials(q.customer)) + '</span><span class="grow"><b>' + esc(q.customer) + ' · ' + esc(q.number) + '</b><small>' + esc([q.address, q.suburb].filter(Boolean).join(', ')) + ' · ' + App.ago(q.updated_at) + '</small></span><span class="end"><b class="num">' + money(q.total, 0) + '</b><small>' + App.pill(q.status) + '</small></span></button>';
+          }).join('') : '<div class="empty" style="padding:18px">No draft or sent quotes' + (f ? ' match' : '') + '.</div>';
+        }
+        m.el.querySelector('#aq').addEventListener('input', draw); draw();
+        m.el.querySelector('#aq-list').onclick = function (e) {
+          var b = e.target.closest('[data-aq]'); if (!b) return; b.disabled = true;
+          App.put('quotes/' + b.getAttribute('data-aq') + '/status', { status: 'Accepted' }).then(function () {
+            m.close(); ctx.query.quote = b.getAttribute('data-aq'); return load();
+          }).catch(function (x) { App.toast(x.message, 'err'); b.disabled = false; });
+        };
+      }).catch(function (e) { App.toast(e.message, 'err'); });
     }
     function settingsModal() {
       var st = settings();

@@ -22,13 +22,18 @@
           d.quotes.map(function (q) {
             return '<tr class="click" data-href="#/quotes/' + esc(q.id) + '"><td><b>' + esc(q.number) + '</b><small>' + App.date(q.created_at) + (q.revision > 1 ? ' · rev ' + q.revision : '') + '</small></td>' +
               '<td><b>' + esc(q.customer) + '</b><small>' + esc(App.addr(q)) + '</small></td><td><small>' + esc(q.services || 'Hedge trimming') + '</small></td>' +
-              '<td>' + App.pill(q.status) + (q.job_id ? ' <span class="tag">Scheduled</span>' : '') + '</td><td class="r"><b>' + money(q.total) + '</b></td><td class="r"><small>' + App.ago(q.updated_at) + '</small></td></tr>';
+              '<td>' + App.pill(q.status) + (q.job_id ? ' <span class="tag">Scheduled</span>' : '') + (q.status === 'Draft' || q.status === 'Sent' ? ' <button class="link small" data-accept="' + esc(q.id) + '">Accept</button>' : q.status === 'Accepted' && !q.job_id ? ' <a class="link small" href="#/schedule?quote=' + esc(q.id) + '">Schedule</a>' : '') + '</td><td class="r"><b>' + money(q.total) + '</b></td><td class="r"><small>' + App.ago(q.updated_at) + '</small></td></tr>';
           }).join('') + '</tbody></table>';
       }).catch(function (e) { App.toast(e.message, 'err'); });
     }
     ctx.el.querySelector('#q').addEventListener('input', function () { clearTimeout(t); t = setTimeout(load, 250); });
     ctx.el.querySelector('#st').onclick = function (e) { var b = e.target.closest('[data-s]'); if (!b) return; status = b.getAttribute('data-s'); ctx.el.querySelectorAll('#st button').forEach(function (x) { x.classList.toggle('on', x === b); }); load(); };
-    ctx.el.addEventListener('click', function (e) { var r = e.target.closest('tr[data-href]'); if (r) App.go(r.getAttribute('data-href')); });
+    ctx.el.addEventListener('click', function (e) {
+      var a = e.target.closest('[data-accept]');
+      if (a) { e.stopPropagation(); App.put('quotes/' + a.getAttribute('data-accept') + '/status', { status: 'Accepted' }).then(function () { App.toast('Accepted — it is in the schedule’s To schedule tray.'); load(); }).catch(function (x) { App.toast(x.message, 'err'); }); return; }
+      if (e.target.closest('a')) return;
+      var r = e.target.closest('tr[data-href]'); if (r) App.go(r.getAttribute('data-href'));
+    });
     load();
   });
 
@@ -134,9 +139,11 @@
       App.setTop({ el: el, back: '#/quotes',
         titleHtml: esc(S.number ? 'Quote ' + S.number : 'New quote') + (S.number ? ' ' + App.pill(S.status) : ''), sub: sub,
         actions: '<span class="num" id="q-total" style="font-weight:700;margin-right:6px">' + (t ? money(t.total) : '') + '</span>' +
+          (S.id ? '<button class="btn" id="status-btn" title="Change status">' + App.pill(S.status) + icon('chev').replace('class="i"', 'class="i" style="transform:rotate(90deg);width:14px;height:14px"') + '</button>' : '') +
           (S.id ? '<a class="btn" href="#/quotes/' + esc(S.id) + '/document">' + icon('print') + '<span class="lbl">Document</span></a>' : '') +
           '<button class="btn primary" id="save">' + icon('save') + '<span class="lbl">' + (S.id ? 'Save' : 'Save quote') + '</span></button>' });
       document.getElementById('save').onclick = save;
+      var sb = document.getElementById('status-btn'); if (sb) sb.onclick = function () { statusMenu(sb); };
     }
     function renderMap() {
       var used = {}, list = [];
@@ -436,14 +443,20 @@
         }).catch(function (e) { App.toast(e.message, 'err', 6000); btn.disabled = false; });
     }
 
-    // status + scheduling live on the top bar's title pill menu
-    document.getElementById('top').addEventListener('click', function (e) {
-      var p = e.target.closest('.pill'); if (!p || !S.id) return;
-      App.menu(p, '<div class="g">Mark quote as</div>' + STATUSES.map(function (s) { return '<button data-v="' + s + '">' + App.pill(s) + '</button>'; }).join('') +
+    // status and scheduling: the Status button (and the pill next to the number)
+    function statusMenu(anchor) {
+      App.menu(anchor, '<div class="g">Mark quote as</div>' + STATUSES.map(function (st) { return '<button data-v="' + st + '">' + App.pill(st) + (st === 'Accepted' ? '<small style="margin-left:6px">goes to the schedule</small>' : '') + '</button>'; }).join('') +
         '<div class="g">Job</div><button data-v="__job">' + icon('calendar') + '<span><b>' + (S.job ? 'Open in schedule' : 'Schedule the job') + '</b><small>' + (S.job ? App.date(S.job.start) + ' · ' + esc(S.job.crew) : 'Drag it onto the calendar') + '</small></span></button>', function (v) {
         if (v === '__job') { App.go(S.job ? '#/schedule?date=' + S.job.start.slice(0, 10) : '#/schedule?quote=' + S.id); return; }
-        App.put('quotes/' + S.id + '/status', { status: v }).then(function () { S.status = v; topKey = null; renderTop(); App.toast('Marked ' + v + '.'); }).catch(function (x) { App.toast(x.message, 'err'); });
+        App.put('quotes/' + S.id + '/status', { status: v }).then(function () {
+          S.status = v; topKey = null; renderTop();
+          if (v === 'Accepted' && !S.job) App.toast('Accepted — it is now in the schedule’s To schedule tray. Open the schedule to drag it onto a day.', null, 6000);
+          else App.toast('Marked ' + v + '.');
+        }).catch(function (x) { App.toast(x.message, 'err'); });
       });
+    }
+    document.getElementById('top').addEventListener('click', function (e) {
+      var pl = e.target.closest('.title-block .pill'); if (pl && S.id) statusMenu(pl);
     });
   }
 
