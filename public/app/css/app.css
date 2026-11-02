@@ -457,3 +457,5 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 
 /* while drawing, existing shapes and pins let taps through so new shapes can overlap them */
 .gis.measuring .leaflet-overlay-pane path.leaflet-interactive, .gis.measuring .map-pin, .gis.measuring .leaflet-marker-icon:not(.ms-vertex) { pointer-events: none !important; }
+.route-pin.base span { background: var(--signal); width: 30px; height: 30px; }
+.route-pin.base span svg.i { width: 16px; height: 16px; color: #fff; }

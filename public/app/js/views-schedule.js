@@ -22,7 +22,8 @@
   function ceilTo(n, step) { return Math.ceil(n / step - 1e-9) * step; }
 
   App.route('/schedule', 'schedule', function (ctx) {
-    var S = { start: monday(ctx.query.date || iso(new Date())), days: 7, jobs: [], waiting: [], settings: null, depot: null, crew: 'Crew 1', crews: ['Crew 1'] };
+    var S = { start: monday(ctx.query.date || iso(new Date())), days: 7, jobs: [], waiting: [], settings: null, depot: null, crew: 'Crew 1', crews: ['Crew 1'], road: {}, provider: 'osrm' };
+    App.me().then(function (me) { S.provider = ((me.business || {}).routing || {}).provider || 'osrm'; });
     var el = ctx.el, drag = null;
     el.className = 'wide';
     if (ctx.query.date) S.focus = ctx.query.date;
@@ -33,9 +34,34 @@
 
     // ---------------- model ----------------
     function jobDur(j) { return j.manHours ? Math.max(SNAP, ceilTo(j.manHours / Math.max(1, j.men) * 60, SNAP)) : Math.max(SNAP, j.endMin - j.startMin); }
-    function travel(a, b) {
+    function pairKey(a, b, date) { return a.lat.toFixed(4) + ',' + a.lng.toFixed(4) + '>' + b.lat.toFixed(4) + ',' + b.lng.toFixed(4) + '@' + date; }
+    function roadKey(a, b, date, min) { return pairKey(a, b, date) + 'T' + String(Math.floor(min / 60)).padStart(2, '0'); }
+    function roadFor(a, b, date, min) {
+      var k = roadKey(a, b, date, min); if (S.road[k]) return S.road[k];
+      var pre = pairKey(a, b, date); for (var kk in S.road) if (kk.indexOf(pre) === 0) return S.road[kk]; // same pair, another hour
+      return null;
+    }
+    /** Road times for consecutive jobs (in the order they'll be laid out), fetched before arranging. */
+    function ensureRoads(lists) {
+      var legs = [], keys = [];
+      lists.forEach(function (list) {
+        if (!list) return;
+        var want = function (j) { return j.desired != null ? j.desired : j.startMin; }, o = list.slice().sort(function (a, b) { return want(a) - want(b); });
+        o.forEach(function (j, i) {
+          if (!i) return; var p = o[i - 1]; if (p.lat == null || j.lat == null) return;
+          var dep = want(p) + jobDur(p), k = roadKey(p, j, j.date, dep);
+          if (S.road[k] || keys.indexOf(k) >= 0) return;
+          keys.push(k); legs.push({ from: { lat: p.lat, lng: p.lng }, to: { lat: j.lat, lng: j.lng }, depart: local(j.date, Math.min(dep, 1439)) });
+        });
+      });
+      if (!legs.length) return Promise.resolve();
+      return App.post('route', { legs: legs }).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); }).catch(function () { /* estimates are used */ });
+    }
+    function travel(a, b, date, departMin) {
       var st = settings();
       if (a.lat == null || b.lat == null) return { min: 15, guess: true };
+      var r = date != null ? roadFor(a, b, date, departMin) : null;
+      if (r) return { min: r.km < 0.05 ? 0 : ceilTo(r.min + st.bufferMinutes, 5), low: Math.round(r.low != null ? r.low : r.min), high: Math.round(r.high != null ? r.high : r.min), km: r.km, source: r.source };
       var dLat = (b.lat - a.lat) * D2R, dLng = (b.lng - a.lng) * D2R;
       var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
       var km = 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h))) * st.roadFactor;
@@ -54,10 +80,10 @@
       var prev = null;
       list.sort(function (a, b) { return (a.desired != null ? a.desired : a.startMin) - (b.desired != null ? b.desired : b.startMin); });
       list.forEach(function (j, i) {
-        var t = prev ? travel(prev, j) : { min: 0 }, earliest = prev ? prev.endMin + t.min : -Infinity;
+        var t = prev ? travel(prev, j, j.date, prev.endMin) : { min: 0 }, earliest = prev ? prev.endMin + t.min : -Infinity;
         var want = j.desired != null ? j.desired : j.startMin;
         j.startMin = j.attached && prev ? earliest : Math.max(want, earliest);
-        j.endMin = j.startMin + jobDur(j); j.travel = t.min; j.guess = !!t.guess; j.seq = i;
+        j.endMin = j.startMin + jobDur(j); j.travel = t.min; j.guess = !!t.guess; j.travelInfo = prev ? t : null; j.seq = i;
         delete j.desired; delete j.attached; prev = j;
       });
       return list;
@@ -240,27 +266,31 @@
       var crew = S.crew, list = group(date, crew);
       markAttached(list);
       var nj = { id: null, quote_id: q.id, customer: q.customer, lat: q.lat, lng: q.lng, crew: crew, men: q.crew_size || 2, manHours: +q.man_hours || 1, date: date, startMin: min, endMin: min + 60, desired: min, attached: false, status: 'Scheduled' };
-      list.push(nj); arrange(list);
-      var moved = nj.startMin !== min ? ' (moved to ' + clock(nj.startMin) + ' to fit the drive from the job before)' : '';
-      apply(list, q.customer + ' booked ' + new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + clock(nj.startMin) + moved + '.');
+      list.push(nj);
+      ensureRoads([list]).then(function () {
+        arrange(list);
+        var moved = nj.startMin !== min ? ' (moved to ' + clock(nj.startMin) + ' to fit the ' + nj.travel + ' min drive from the job before)' : '';
+        apply(list, q.customer + ' booked ' + new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + clock(nj.startMin) + moved + '.');
+      });
     }
     /** Move or change a job: work out which jobs follow which first, then lay out the old and the new crew-day. */
     function relayout(j, changes) {
       var old = group(j.date, j.crew); markAttached(old);
       var others = old.filter(function (x) { return x !== j; }), oldDate = j.date, oldCrew = j.crew;
       Object.assign(j, changes);
-      if (j.date === oldDate && j.crew === oldCrew) return arrange(old);
-      arrange(others);
-      var nl = group(j.date, j.crew, j); markAttached(nl);
-      if (j.desired == null) j.desired = j.startMin;
-      j.attached = false; nl.push(j);
-      return arrange(nl).concat(others);
+      var same = j.date === oldDate && j.crew === oldCrew, nl = null;
+      if (!same) { nl = group(j.date, j.crew, j); markAttached(nl); if (j.desired == null) j.desired = j.startMin; j.attached = false; nl.push(j); }
+      return ensureRoads(same ? [old] : [others, nl]).then(function () {
+        if (same) return arrange(old);
+        arrange(others); return arrange(nl).concat(others);
+      });
     }
     function moveJob(j, date, min) {
-      var all = relayout(j, { date: date, desired: min, attached: false });
-      apply(all, j.startMin !== min ? 'Moved to ' + clock(j.startMin) + ' to leave time to drive from the job before.' : null);
+      relayout(j, { date: date, desired: min, attached: false }).then(function (all) {
+        apply(all, j.startMin !== min ? 'Moved to ' + clock(j.startMin) + ' to leave ' + j.travel + ' min to drive from the job before.' : null);
+      });
     }
-    function reflow(j, changes) { return apply(relayout(j, changes)); }
+    function reflow(j, changes) { return relayout(j, changes).then(apply); }
 
     // ---------------- dialogs ----------------
     function jobModal(j) {
@@ -273,7 +303,7 @@
         '<label class="field">Status<select id="j-status">' + STATUSES.slice(0, 3).map(function (s) { return '<option' + (s === j.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></label>' +
         '<label class="field">Actual hours (after the job)<input id="j-actual" type="number" min="0" step="0.25" value="' + (j.actual || '') + '"></label><span></span>' +
         '<label class="field span2">Notes for the crew<textarea id="j-notes">' + esc(j.notes || '') + '</textarea></label></div>' +
-        (j.travel ? '<p class="muted small">' + j.travel + ' min drive from the crew’s previous job' + (j.guess ? ' (estimated — a property has no house pin)' : '') + '.</p>' : '') +
+        (j.travel ? '<p class="muted small">' + j.travel + ' min from the crew’s previous job, including ' + settings().bufferMinutes + ' min to park' + (j.travelInfo && j.travelInfo.low != null ? ' (drive ' + j.travelInfo.low + '–' + j.travelInfo.high + ' min, ' + (j.travelInfo.source === 'google' ? 'Google traffic' : 'by road') + ')' : '') + (j.guess ? ' (estimated — a property has no house pin)' : '') + '.</p>' : '') +
         '<div class="actions"><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
         '<button class="btn ghost" id="j-un" style="color:var(--danger)">Unschedule</button><span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="j-ok">Save</button></div>', { noFocus: true });
       var men = j.men, q = function (id) { return m.el.querySelector('#' + id); };
@@ -289,7 +319,7 @@
           if (!ok) return;
           var all = group(j.date, j.crew); markAttached(all);
           var rest = all.filter(function (x) { return x !== j; });
-          App.del('jobs/' + j.id).then(function () { S.jobs = S.jobs.filter(function (x) { return x !== j; }); arrange(rest); return apply(rest, 'Unscheduled — it is back in To schedule.'); });
+          App.del('jobs/' + j.id).then(function () { S.jobs = S.jobs.filter(function (x) { return x !== j; }); return ensureRoads([rest]); }).then(function () { arrange(rest); return apply(rest, 'Unscheduled — it is back in To schedule.'); });
         });
       };
       q('j-ok').onclick = function () {
@@ -303,23 +333,24 @@
       };
     }
     function routeModal(date) {
-      var gis, byCrew = {};
+      var gis, byCrew = {}, dt = new Date(date + 'T00:00:00');
       S.jobs.filter(function (j) { return j.date === date; }).sort(function (a, b) { return a.startMin - b.startMin; }).forEach(function (j) { (byCrew[j.crew] = byCrew[j.crew] || []).push(j); });
-      var dt = new Date(date + 'T00:00:00');
-      var m = App.modal('<h2>Route · ' + dt.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' }) + '</h2><p class="sub">Stops in order with the driving time between them (straight-line distance × ' + settings().roadFactor + ' road factor at ' + settings().speedKmh + ' km/h, plus ' + settings().bufferMinutes + ' min to park).</p>' +
-        '<div id="route-map" style="height:340px;margin-bottom:12px"></div>' +
-        Object.keys(byCrew).map(function (c) {
-          var list = byCrew[c], drive = list.reduce(function (s, j, i) { return s + (i ? j.travel : 0); }, 0);
-          return '<h3 style="margin:10px 0 6px">' + esc(c) + ' · ' + clock(list[0].startMin) + '–' + clock(list[list.length - 1].endMin) + ' · ' + drive + ' min driving</h3><div class="list">' + list.map(function (j, i) {
-            return (i && j.travel ? '<div class="li route-drive">' + icon('truck') + '<span class="muted small">' + j.travel + ' min drive' + (j.guess ? ' (estimate)' : '') + '</span></div>' : '') +
-              '<div class="li"><span class="avatar">' + (i + 1) + '</span><span class="grow"><b>' + clock(j.startMin) + '–' + clock(j.endMin) + ' · ' + esc(j.customer) + '</b><small>' + esc([j.address, j.suburb].filter(Boolean).join(', ')) + ' · ' + j.men + ' men</small></span></div>';
-          }).join('') + '</div>';
-        }).join('') + '<div class="actions"><button class="btn" data-close>Close</button></div>', { wide: true, noFocus: true, onClose: function () { if (gis) gis.destroy(); } });
+      var src = S.provider === 'google' ? 'Google Maps traffic predictions for each departure time' : 'road routes on OpenStreetMap (OSRM), with a range for typical traffic';
+      var m = App.modal('<h2>Route · ' + dt.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' }) + '</h2><p class="sub">Drive times from ' + src + '. Each stop also allows ' + settings().bufferMinutes + ' min to park and unload.</p>' +
+        '<div id="route-map" style="height:360px;margin-bottom:12px"></div><div id="route-list"><div class="empty">Working out the drives…</div></div><div class="actions"><button class="btn" data-close>Close</button></div>',
+        { wide: true, noFocus: true, onClose: function () { if (gis) gis.destroy(); } });
       gis = GIS.create(m.el.querySelector('#route-map'), { toolbar: false, basemap: 'street' });
-      var bounds = [];
-      Object.keys(byCrew).forEach(function (c, ci) {
-        var pts = byCrew[c].filter(function (j) { return j.lat != null; }).map(function (j) { return L.latLng(j.lat, j.lng); });
-        if (pts.length > 1) L.polyline(pts, { color: ['#0f7a5f', '#2f6fd0', '#ae3ec9'][ci % 3], weight: 4, opacity: 0.85, dashArray: '8 6' }).addTo(gis.map);
+      var depot = S.depot && S.depot.lat != null ? S.depot : null, legs = [], meta = [];
+      Object.keys(byCrew).forEach(function (c) {
+        var list = byCrew[c].filter(function (j) { return j.lat != null; });
+        if (!list.length) return;
+        if (depot) { legs.push({ from: depot, to: list[0], depart: local(date, Math.max(0, list[0].startMin - 60)) }); meta.push({ crew: c, kind: 'out' }); }
+        list.forEach(function (j, i) { if (i) { legs.push({ from: list[i - 1], to: j, depart: local(date, list[i - 1].endMin) }); meta.push({ crew: c, kind: 'between', to: j }); } });
+        if (depot) { legs.push({ from: list[list.length - 1], to: depot, depart: local(date, Math.min(1439, list[list.length - 1].endMin)) }); meta.push({ crew: c, kind: 'home' }); }
+      });
+      var colors = ['#0f7a5f', '#2f6fd0', '#ae3ec9'], bounds = [];
+      if (depot) { L.marker([depot.lat, depot.lng], { icon: L.divIcon({ className: 'route-pin base', iconSize: [30, 30], iconAnchor: [15, 15], html: '<span>' + App.icon('home') + '</span>' }) }).addTo(gis.map); bounds.push(L.latLng(depot.lat, depot.lng)); }
+      Object.keys(byCrew).forEach(function (c) {
         byCrew[c].forEach(function (j, i) {
           if (j.lat == null) return;
           L.marker([j.lat, j.lng], { icon: L.divIcon({ className: 'route-pin', iconSize: [28, 28], iconAnchor: [14, 14], html: '<span>' + (i + 1) + '</span>' }) }).addTo(gis.map);
@@ -327,6 +358,29 @@
         });
       });
       setTimeout(function () { gis.map.invalidateSize(); if (bounds.length > 1) gis.map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40] }); else if (bounds.length) gis.map.setView(bounds[0], 15); }, 60);
+      var plain = function (l) { return { lat: +l.lat, lng: +l.lng }; };
+      App.post('route', { geometry: true, legs: legs.map(function (l) { return { from: plain(l.from), to: plain(l.to), depart: l.depart }; }) }).then(function (d) {
+        var res = d.legs || [];
+        res.forEach(function (r, i) {
+          if (!r) return; var mm = meta[i], col = colors[Object.keys(byCrew).indexOf(mm.crew) % 3];
+          var line = r.geometry && r.geometry.length > 1 ? r.geometry : [[legs[i].from.lat, legs[i].from.lng], [legs[i].to.lat, legs[i].to.lng]];
+          L.polyline(line, { color: col, weight: 5, opacity: mm.kind === 'between' ? 0.9 : 0.5, dashArray: r.geometry ? null : '8 6' }).addTo(gis.map);
+        });
+        var rng = function (r) { return !r ? '—' : (Math.round(r.high) > Math.round(r.low) ? Math.round(r.low) + '–' + Math.round(r.high) : Math.round(r.min)) + ' min · ' + r.km.toFixed(1) + ' km' + (r.source === 'estimate' ? ' (estimate)' : r.source === 'google' ? ' · traffic' : ''); };
+        m.el.querySelector('#route-list').innerHTML = Object.keys(byCrew).map(function (c) {
+          var list = byCrew[c], rows = [], total = 0;
+          var legOf = function (kind, to) { for (var i = 0; i < meta.length; i++) if (meta[i].crew === c && meta[i].kind === kind && (!to || meta[i].to === to)) return res[i]; return null; };
+          var out = legOf('out'), home = legOf('home');
+          if (out) rows.push('<div class="li route-drive">' + App.icon('home') + '<span class="muted small">Leave home base by <b>' + clock(list[0].startMin - Math.ceil(out.high != null ? out.high : out.min)) + '</b> · ' + rng(out) + '</span></div>');
+          list.forEach(function (j, i) {
+            var r = i ? legOf('between', j) : null; if (r) total += r.min;
+            if (i) rows.push('<div class="li route-drive">' + App.icon('truck') + '<span class="muted small">' + rng(r) + ' · ' + j.travel + ' min allowed</span></div>');
+            rows.push('<div class="li"><span class="avatar">' + (i + 1) + '</span><span class="grow"><b>' + clock(j.startMin) + '–' + clock(j.endMin) + ' · ' + esc(j.customer) + '</b><small>' + esc([j.address, j.suburb].filter(Boolean).join(', ')) + ' · ' + j.men + ' men</small></span></div>');
+          });
+          if (home) rows.push('<div class="li route-drive">' + App.icon('home') + '<span class="muted small">Back at base about <b>' + clock(list[list.length - 1].endMin + Math.round(home.min)) + '</b> · ' + rng(home) + '</span></div>');
+          return '<h3 style="margin:10px 0 6px">' + esc(c) + ' · ' + clock(list[0].startMin) + '–' + clock(list[list.length - 1].endMin) + ' · ' + Math.round(total) + ' min driving between jobs</h3><div class="list">' + rows.join('') + '</div>';
+        }).join('') + (depot ? '' : '<p class="muted small">Set your home base in Settings to see the drive out and back.</p>');
+      }).catch(function (e) { m.el.querySelector('#route-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
     }
     /** Pick a draft or sent quote the customer has said yes to: it becomes Accepted and joins the tray. */
     function addAccepted() {
@@ -353,9 +407,9 @@
     }
     function settingsModal() {
       var st = settings();
-      var m = App.modal('<h2>Working day and travel</h2><p class="sub">Used to shade the calendar and to space jobs by driving time.</p><div class="grid2">' +
+      var m = App.modal('<h2>Working day and travel</h2><p class="sub">Drive times come from road routing (see Settings › Drive times). The speed and road factor are only used if routing can’t be reached.</p><div class="grid2">' +
         '<label class="field">Day starts<input id="s-a" type="time" value="' + st.dayStart + '"></label><label class="field">Day ends<input id="s-b" type="time" value="' + st.dayEnd + '"></label>' +
-        '<label class="field">Average driving speed (km/h)<input id="s-v" type="number" min="5" step="1" value="' + st.speedKmh + '"></label><label class="field">Road distance ÷ straight line<input id="s-f" type="number" min="1" step="0.05" value="' + st.roadFactor + '"></label>' +
+        '<label class="field">Fallback speed (km/h)<input id="s-v" type="number" min="5" step="1" value="' + st.speedKmh + '"></label><label class="field">Fallback road factor<input id="s-f" type="number" min="1" step="0.05" value="' + st.roadFactor + '"></label>' +
         '<label class="field">Park and unload (min per stop)<input id="s-p" type="number" min="0" step="1" value="' + st.bufferMinutes + '"></label></div>' +
         '<div class="actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="ok">Save</button></div>');
       m.el.querySelector('#ok').onclick = function () {

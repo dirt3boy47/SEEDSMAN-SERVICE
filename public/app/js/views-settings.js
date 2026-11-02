@@ -98,7 +98,7 @@
   App.route('/settings', 'settings', function (ctx) {
     App.setTop({ title: 'Settings', sub: 'Business, documents, staff and appearance' });
     App.refreshMe().then(function (me) {
-      var b = me.business || {}, im = b.imagery || {}, f = function (id, label, v, type, span) { return '<label class="field' + (span ? ' ' + span : '') + '">' + label + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v || '') + '"></label>'; };
+      var b = me.business || {}, im = b.imagery || {}, rt = b.routing || {}, f = function (id, label, v, type, span) { return '<label class="field' + (span ? ' ' + span : '') + '">' + label + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v || '') + '"></label>'; };
       var theme = (function () { try { return localStorage.getItem('seedsman-theme') || 'auto'; } catch (e) { return 'auto'; } })();
       ctx.el.innerHTML = '<div class="page"><div class="cols"><div class="stack">' +
         '<div class="card"><div class="card-h"><h2>Business details</h2><span class="muted small">Shown on quote documents</span></div><div class="card-b grid2">' +
@@ -115,6 +115,10 @@
           '<div class="grid2"><label class="field">MetroMap API key<input id="im-mm" type="password" autocomplete="off" value="' + esc(im.metromapKey || '') + '" placeholder="From MetroMap support"></label><label class="field">MetroMap layer<input id="im-ml" value="' + esc(im.metromapLayer || 'Australia_latest') + '"></label></div>' +
           '<label class="field">Open maps with<select id="im-def">' + [['', 'Best available'], ['nearmap', 'Nearmap'], ['metromap', 'MetroMap'], ['clarity', 'Satellite HD (Esri Clarity)'], ['world', 'Satellite (Esri)'], ['vic', 'Vicmap aerial (licensed)'], ['street', 'Street map']].map(function (o) { return '<option value="' + o[0] + '"' + ((im.default || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
           '<div><button class="btn" id="im-save">' + icon('save') + 'Save imagery</button></div></div></div>' +
+        '<div class="card"><div class="card-h"><h2>Drive times</h2><span class="tag">' + (rt.hasGoogleKey ? 'Google traffic' : 'Open-source roads') + '</span></div><div class="card-b stack">' +
+          '<p class="muted small" style="margin:0">Drive times come from real road routes (OSRM, open source, on OpenStreetMap) with a range for typical traffic. For traffic-aware times — Google’s prediction for the departure time, with an optimistic–pessimistic range — add a Google Maps API key with the <b>Distance Matrix API</b> enabled. The key stays on the server.</p>' +
+          '<label class="field">Google Maps API key<input id="rt-key" type="password" autocomplete="off" placeholder="' + (rt.hasGoogleKey ? 'Saved — type a new key to replace it' : 'Optional') + '"></label>' +
+          '<div class="row"><button class="btn" id="rt-save">' + icon('save') + 'Save key</button>' + (rt.hasGoogleKey ? '<button class="btn ghost" id="rt-del" style="color:var(--danger)">Remove key</button>' : '') + '</div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Home base</h2></div><div class="card-b stack"><p class="muted small" style="margin:0">Where the crew starts from. Quotes work out the return trip from here.</p>' +
           '<label class="field">Address<input id="hb-addr" value="' + esc((b.depot && b.depot.address) || '') + '" placeholder="Start typing your yard or home address"></label><div class="muted small" id="hb-note">' + (b.depot ? 'Saved: ' + esc(b.depot.address) : 'Not set yet.') + '</div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Map start</h2></div><div class="card-b"><p class="muted small" style="margin-top:0">New maps open on ' + (b.mapStart ? 'your saved spot' : 'the Mornington Peninsula') + '.</p><button class="btn" id="map-here">' + icon('gps') + 'Use my current location</button></div></div>' +
@@ -126,6 +130,9 @@
           .then(function () { App.refreshMe(); App.toast('Business details saved.'); }).catch(function (x) { App.toast(x.message, 'err'); });
       };
       $('theme').onclick = function (e) { var t = e.target.closest('[data-t]'); if (!t) return; ctx.el.querySelectorAll('#theme button').forEach(function (x) { x.classList.toggle('on', x === t); }); var v = t.getAttribute('data-t'); if (v === 'auto') { document.documentElement.removeAttribute('data-theme'); try { localStorage.setItem('seedsman-theme', 'auto'); } catch (er) { /* ignore */ } } else { document.documentElement.setAttribute('data-theme', v); try { localStorage.setItem('seedsman-theme', v); } catch (er) { /* ignore */ } } };
+      var saveRt = function (k) { App.put('business', { routing: { googleKey: k } }).then(function () { App.toast(k ? 'Google key saved — drive times now use traffic predictions.' : 'Google key removed — drive times use open-source road routes.'); App.refreshMe(); App.go('#/settings'); }).catch(function (x) { App.toast(x.message, 'err'); }); };
+      $('rt-save').onclick = function () { var k = $('rt-key').value.trim(); if (!k) return App.toast('Paste the key first.', 'warn'); saveRt(k); };
+      if ($('rt-del')) $('rt-del').onclick = function () { saveRt(''); };
       $('im-save').onclick = function () {
         App.put('business', { imagery: { nearmapKey: $('im-nm').value, metromapKey: $('im-mm').value, metromapLayer: $('im-ml').value, default: $('im-def').value } }).then(function () {
           try { localStorage.removeItem('seedsman-basemap'); } catch (e) { /* ignore */ }

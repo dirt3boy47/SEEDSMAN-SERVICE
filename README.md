@@ -39,6 +39,15 @@ Other pages: **Overview** (open quotes, won this month, win rate, jobs this week
 location, draw and save site drawings), **Services & pricing** (the rate card), **Reports** (quoted vs won by month, by service,
 by suburb), **Settings** (business details and document terms, staff logins, appearance, password).
 
+## Drive times
+
+Road routing runs on the server (`/api/route`): **OSRM** (open source, OpenStreetMap roads) by default, with a range for
+typical traffic (wider in weekday peaks, 7–9:30am and 3:30–6:30pm); responses are cached. Add a **Google Maps API key**
+(Distance Matrix API) in **Settings › Drive times** for Google's traffic predictions at each departure time, with an
+optimistic–pessimistic range; the key never leaves the server. If neither answers, a straight-line estimate is used.
+The schedule spaces jobs by these times (+ parking minutes), and **Route** shows the road route, the drive from and back
+to the home base, and each leg's range. Quote travel uses the same router.
+
 ## Map imagery
 
 **Settings › Map imagery**: add a **Nearmap** API key (Tile API v3, zoom 21) or a **MetroMap** key and layer (XYZ, zoom 22)

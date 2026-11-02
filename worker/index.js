@@ -86,6 +86,12 @@ async function business(env) {
   const row = await env.DB.prepare("SELECT value FROM business_settings WHERE id = 'business'").first();
   return row ? parseJson(row.value, {}) : {};
 }
+/** Business settings as sent to staff browsers: the Google routing key stays on the server. */
+function clientBusiness(b) {
+  const out = Object.assign({}, b);
+  if (b.routing) out.routing = { provider: b.routing.googleKey ? 'google' : 'osrm', hasGoogleKey: !!b.routing.googleKey };
+  return out;
+}
 async function activeRates(env) {
   const row = await env.DB.prepare('SELECT id, snapshot, approval_status FROM rate_library WHERE active = 1 ORDER BY effective_date DESC, created_at DESC LIMIT 1').first();
   const r = Pricing.normalise(row ? parseJson(row.snapshot, {}) : {});
@@ -120,7 +126,7 @@ async function api(request, env, url) {
       if (parts[1] === 'logout' && m === 'POST') { await env.DB.prepare('DELETE FROM session WHERE id = ?').bind(me.sid).run(); return json({ ok: true }); }
       break;
     case 'me':
-      if (!id && m === 'GET') return json({ user: publicUser(me), business: await business(env), rates: await activeRates(env) });
+      if (!id && m === 'GET') return json({ user: publicUser(me), business: clientBusiness(await business(env)), rates: await activeRates(env) });
       if (id === 'password' && m === 'POST') return changePassword(env, me, body);
       break;
     case 'business': if (m === 'PUT') return saveBusiness(env, me, body); break;
@@ -134,6 +140,7 @@ async function api(request, env, url) {
     case 'quotes': return quotesApi(env, me, m, parts, url, body);
     case 'jobs': return jobsApi(env, me, m, parts, url, body);
     case 'schedule': return scheduleApi(env, me, m, parts, url, body);
+    case 'route': if (m === 'POST') return routeApi(env, body); break;
   }
   fail(404, 'Not found.');
 }
@@ -162,10 +169,13 @@ async function saveBusiness(env, me, body) {
     if (body.imagery.default != null) im.default = ['nearmap', 'metromap', 'clarity', 'world', 'vic', 'street'].indexOf(body.imagery.default) >= 0 ? body.imagery.default : '';
     cur.imagery = im;
   }
+  if (body.routing && typeof body.routing === 'object' && body.routing.googleKey != null) {
+    cur.routing = Object.assign({}, cur.routing, { googleKey: str(body.routing.googleKey, 200).replace(/\s+/g, '') });
+  }
   if (body.depot && isFinite(body.depot.lat) && isFinite(body.depot.lng)) cur.depot = { lat: +body.depot.lat, lng: +body.depot.lng, address: str(body.depot.address, 200) };
   await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('business', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(cur)).run();
   await audit(env, me, 'business', 'business', 'update', cur);
-  return json({ business: cur });
+  return json({ business: clientBusiness(cur) });
 }
 async function ratesApi(env, me, m, body) {
   if (m === 'GET') {
@@ -593,7 +603,7 @@ async function scheduleApi(env, me, m, parts, url, body) {
       "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id " +
       "WHERE q.status = 'Accepted' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') ORDER BY q.updated_at").all()).results;
     const b = await business(env);
-    return json({ jobs, waiting, settings: Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}), depot: b.mapStart || null });
+    return json({ jobs, waiting, settings: Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}), depot: b.depot || null });
   }
   if (parts[1] === 'settings' && m === 'PUT') {
     const b = await business(env), cur = Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {});
@@ -701,4 +711,76 @@ async function publicApi(request, env, parts, url, m, body) {
     return json({ ok: true });
   }
   fail(404, 'Not found.');
+}
+
+// ---------------- road routing ----------------
+// Open-source OSRM (OpenStreetMap roads) by default; with a Google Maps key (Settings), Google's traffic predictions for
+// the departure time give the time and an optimistic–pessimistic range. Straight-line estimate if neither answers.
+const OSRM_DEFAULT = 'https://router.project-osrm.org';
+const GOOGLE_DM_DEFAULT = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+function straightKmW(a, b) {
+  const D = Math.PI / 180, dLat = (b.lat - a.lat) * D, dLng = (b.lng - a.lng) * D;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D) * Math.cos(b.lat * D) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+/** Peak-hour widening for routes without live traffic: [typical, high] multipliers. */
+function trafficBand(local) {
+  if (!LOCAL_DT.test(local || '')) return [1.1, 1.25];
+  const d = new Date(local.slice(0, 10) + 'T00:00:00Z').getUTCDay(), t = +local.slice(11, 13) + +local.slice(14, 16) / 60;
+  const peak = d >= 1 && d <= 5 && ((t >= 7 && t < 9.5) || (t >= 15.5 && t < 18.5));
+  return peak ? [1.25, 1.5] : [1.05, 1.2];
+}
+/** Local wall-clock time in a time zone → unix seconds. */
+function localToUnix(local, tz) {
+  const guess = Date.parse(local + ':00Z');
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(guess));
+  const g = {}; parts.forEach((p) => { g[p.type] = p.value; });
+  const asLocal = Date.parse(g.year + '-' + g.month + '-' + g.day + 'T' + g.hour + ':' + g.minute + ':00Z');
+  return Math.round((guess - (asLocal - guess)) / 1000);
+}
+async function osrmLeg(env, a, b, withGeometry) {
+  const base = env.OSRM_URL || OSRM_DEFAULT;
+  const u = base + '/route/v1/driving/' + a.lng.toFixed(5) + ',' + a.lat.toFixed(5) + ';' + b.lng.toFixed(5) + ',' + b.lat.toFixed(5) + '?overview=' + (withGeometry ? 'simplified' : 'false') + '&geometries=geojson';
+  const r = await fetch(u, { cf: { cacheTtl: 2592000, cacheEverything: true }, headers: { 'User-Agent': 'SeedsmanQuote/1.0' } });
+  if (!r.ok) throw new Error('osrm ' + r.status);
+  const d = await r.json(), rt = d.routes && d.routes[0];
+  if (!rt) throw new Error('osrm no route');
+  return { km: rt.distance / 1000, min: rt.duration / 60, geometry: withGeometry && rt.geometry ? rt.geometry.coordinates.map((c) => [c[1], c[0]]) : null };
+}
+async function googleLeg(env, key, a, b, departUnix) {
+  const base = env.GOOGLE_DM_URL || GOOGLE_DM_DEFAULT, now = Math.floor(Date.now() / 1000);
+  let dep = departUnix || now;
+  while (dep < now) dep += 7 * 86400; // past times: the same weekday and time next week
+  const one = async (model) => {
+    const u = base + '?origins=' + a.lat + ',' + a.lng + '&destinations=' + b.lat + ',' + b.lng + '&mode=driving&departure_time=' + dep + '&traffic_model=' + model + '&key=' + encodeURIComponent(key);
+    const d = await (await fetch(u)).json();
+    const el = d.rows && d.rows[0] && d.rows[0].elements && d.rows[0].elements[0];
+    if (d.status !== 'OK' || !el || el.status !== 'OK') throw new Error('google ' + (d.error_message || d.status || (el && el.status)));
+    return { km: el.distance.value / 1000, min: (el.duration_in_traffic || el.duration).value / 60 };
+  };
+  const [best, low, high] = await Promise.all([one('best_guess'), one('optimistic'), one('pessimistic')]);
+  return { km: best.km, min: best.min, low: low.min, high: high.min };
+}
+async function routeApi(env, body) {
+  const b = await business(env), key = b.routing && b.routing.googleKey, tz = b.timezone || 'Australia/Melbourne';
+  const legs = (Array.isArray(body.legs) ? body.legs : []).slice(0, 30);
+  const ok = (p) => p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
+  const out = await Promise.all(legs.map(async (l) => {
+    if (!ok(l.from) || !ok(l.to)) return null;
+    const a = { lat: +l.from.lat, lng: +l.from.lng }, c = { lat: +l.to.lat, lng: +l.to.lng }, depart = LOCAL_DT.test(l.depart || '') ? l.depart : null;
+    if (straightKmW(a, c) < 0.05) return { km: 0, min: 0, low: 0, high: 0, source: 'same' };
+    let geometry = null;
+    if (body.geometry) { try { geometry = (await osrmLeg(env, a, c, true)).geometry; } catch (e) { geometry = null; } }
+    if (key) {
+      try { const g = await googleLeg(env, key, a, c, depart ? localToUnix(depart, tz) : null); return Object.assign(g, { source: 'google', geometry }); } catch (e) { /* fall through to OSRM */ }
+    }
+    try {
+      const o = await osrmLeg(env, a, c, false), band = trafficBand(depart);
+      return { km: o.km, min: o.min * band[0], low: o.min, high: o.min * band[1], source: 'osrm', geometry };
+    } catch (e) {
+      const km = straightKmW(a, c) * 1.35, min = km / 50 * 60;
+      return { km, min, low: min * 0.85, high: min * 1.3, source: 'estimate', geometry };
+    }
+  }));
+  return json({ legs: out });
 }

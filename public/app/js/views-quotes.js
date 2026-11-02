@@ -190,7 +190,7 @@
     }
     function showTravel() {
       var box = el.querySelector('#travel-hint'), r = S.travelInfo; if (!box) return;
-      if (r) box.textContent = r.km.toFixed(1) + ' km each way · about ' + Math.round(r.min) + ' min' + (r.road ? ' by road' : ' (estimate: straight line × 1.35)') + ' from home base';
+      if (r) box.textContent = r.km.toFixed(1) + ' km each way · ' + (r.low != null && Math.round(r.high) > Math.round(r.low) ? Math.round(r.low) + '–' + Math.round(r.high) : Math.round(r.min)) + ' min' + (r.source === 'google' ? ' (Google traffic)' : r.road ? ' by road' : ' (estimate)') + ' from home base';
       else if (biz.depot) box.innerHTML = '<button type="button" class="link" id="travel-calc" style="padding:0">Work out from home base</button>';
       else box.innerHTML = 'Set your <a href="#/settings">home base</a> to work this out automatically.';
     }

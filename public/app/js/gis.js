@@ -367,15 +367,14 @@
     var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a.lat * D) * Math.cos(b.lat * D) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
   }
-  /** One-way driving distance and time: by road (OSRM) when it answers, otherwise straight line × 1.35 at 50 km/h. */
-  function drive(a, b) {
+  /** One-way driving distance and time from the app's router (Google traffic or OSRM roads, see worker routeApi). */
+  function drive(a, b, depart) {
     var est = function () { var km = straightKm(a, b) * 1.35; return { km: km, min: km / 50 * 60, road: false }; };
-    var url = 'https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=false';
-    var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 6000); });
-    return Promise.race([fetch(url).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }), timeout]).then(function (d) {
-      var rt = d && d.routes && d.routes[0];
-      return rt ? { km: rt.distance / 1000, min: rt.duration / 60, road: true } : est();
-    });
+    if (!window.App || !App.token()) return Promise.resolve(est());
+    return App.post('route', { legs: [{ from: a, to: b, depart: depart || null }] }).then(function (d) {
+      var l = d.legs && d.legs[0]; if (!l) return est();
+      return { km: l.km, min: l.min, low: l.low, high: l.high, road: l.source !== 'estimate', source: l.source };
+    }).catch(est);
   }
   /** Turn a text input into an address field with suggestions. opts: {near(): {lat,lng}, onPick(place)} */
   function addressInput(input, opts) {
