@@ -307,12 +307,13 @@ async function drawingsOf(env, pid) {
 function cleanGeometry(g) {
   if (!g || !Array.isArray(g.coordinates)) return null;
   if (g.type === 'Point' && g.coordinates.length === 2) return g;
+  if (g.type === 'MultiPoint' && g.coordinates.length >= 1 && g.coordinates.length <= 500 && g.coordinates.every((c) => Array.isArray(c) && c.length === 2)) return g;
   if (g.type === 'LineString' && g.coordinates.length >= 2) return g;
   if (g.type === 'Polygon' && Array.isArray(g.coordinates[0]) && g.coordinates[0].length >= 4) return g;
   return null;
 }
-const kindOf = (g) => (g.type === 'Polygon' ? 'area' : g.type === 'Point' ? 'point' : 'line');
-function cleanMeasure(mm) { mm = mm || {}; return { length: numOrNull(mm.length), area: numOrNull(mm.area), perimeter: numOrNull(mm.perimeter) }; }
+const kindOf = (g) => (g.type === 'Polygon' ? 'area' : g.type === 'Point' || g.type === 'MultiPoint' ? 'point' : 'line');
+function cleanMeasure(mm) { mm = mm || {}; return { length: numOrNull(mm.length), area: numOrNull(mm.area), perimeter: numOrNull(mm.perimeter), count: numOrNull(mm.count) }; }
 
 async function customersApi(env, me, m, parts, url, body) {
   const cid = parts[1];

@@ -49,7 +49,7 @@
           '<div class="row" style="padding:6px 12px 10px"><a class="btn sm primary" href="#/quotes/new?property=' + esc(p.id) + '">' + icon('plus') + 'New quote</a><button class="btn sm" id="pdraw">' + icon('ruler') + 'Draw</button><a class="btn sm" href="#/properties/' + esc(p.id) + '">Open</a></div>' +
           '<div style="padding:0 16px 8px" class="muted small">' + d.drawings.length + ' drawing' + (d.drawings.length === 1 ? '' : 's') + (total.area ? ' · ' + GIS.fmtArea(total.area) + ' of areas' : '') + (total.line ? ' · ' + GIS.fmtLen(total.line) + ' of lines' : '') + '</div>' +
           '<div class="list" style="overflow:auto;flex:1;border-top:1px solid var(--line)">' + (d.drawings.map(function (x) {
-            var m = x.measure || {}; return '<div class="li" data-d="' + esc(x.id) + '"><span class="avatar">' + icon(x.kind === 'area' ? 'area' : x.kind === 'point' ? 'pin' : 'line') + '</span><span class="grow"><b>' + esc(x.name) + '</b><small>' + (x.kind === 'area' ? GIS.fmtArea(m.area || 0) : x.kind === 'line' ? GIS.fmtLen(m.length || 0) : 'Point') + '</small></span><button class="ib sm" data-zoom="' + esc(x.id) + '" title="Zoom to">' + icon('expand') + '</button></div>';
+            var m = x.measure || {}; return '<div class="li" data-d="' + esc(x.id) + '"><span class="avatar">' + icon(x.kind === 'area' ? 'area' : x.kind === 'point' ? 'pin' : 'line') + '</span><span class="grow"><b>' + esc(x.name) + '</b><small>' + (x.kind === 'area' ? GIS.fmtArea(m.area || 0) : x.kind === 'line' ? GIS.fmtLen(m.length || 0) : (GIS.toLatLngs(x.geometry).length > 1 ? GIS.toLatLngs(x.geometry).length + ' points' : 'Point')) + '</small></span><button class="ib sm" data-zoom="' + esc(x.id) + '" title="Zoom to">' + icon('expand') + '</button></div>';
           }).join('') || '<div class="empty" style="padding:18px">No site drawings yet. Tap <b>Draw</b> to measure lines and areas and save them to this property.</div>') + '</div>' +
           (d.quotes.length ? '<div style="border-top:1px solid var(--line)"><div class="nav-g" style="margin:10px 16px 2px">Quotes</div><div class="list">' + d.quotes.slice(0, 3).map(function (q) { return '<a class="li" href="#/quotes/' + esc(q.id) + '"><span class="grow"><b>' + esc(q.number) + '</b><small>' + App.date(q.created_at) + '</small></span><span class="end">' + App.pill(q.status) + '</span></a>'; }).join('') + '</div></div>' : '');
         panel.querySelector('#pback').onclick = listView;
@@ -58,10 +58,10 @@
       }).catch(function (e) { App.toast(e.message, 'err'); });
     }
     function drawFor(pid) {
-      gis.draw({ title: 'New site drawing', modes: ['line', 'area', 'point'], doneLabel: 'Save drawing', onDone: function (r) {
-        var m = App.modal('<h2>Name this drawing</h2><p class="sub">' + (r.mode === 'area' ? GIS.fmtArea(r.area) : r.mode === 'line' ? GIS.fmtLen(r.length) : 'Point') + '</p><label class="field">Name<input id="d-name" placeholder="e.g. Front hedge, back lawn"></label><div class="actions"><button class="btn" data-close>Discard</button><button class="btn primary" id="ok">Save</button></div>');
+      gis.draw({ title: 'New site drawing', modes: ['line', 'area', 'points'], doneLabel: 'Save drawing', onDone: function (r) {
+        var m = App.modal('<h2>Name this drawing</h2><p class="sub">' + (r.mode === 'area' ? GIS.fmtArea(r.area) : r.mode === 'line' ? GIS.fmtLen(r.length) : r.count + (r.count === 1 ? ' point' : ' points')) + '</p><label class="field">Name<input id="d-name" placeholder="e.g. Front hedge, back lawn"></label><div class="actions"><button class="btn" data-close>Discard</button><button class="btn primary" id="ok">Save</button></div>');
         m.el.querySelector('#ok').onclick = function () {
-          App.post('drawings', { property_id: pid, name: m.el.querySelector('#d-name').value || 'Drawing', geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter } })
+          App.post('drawings', { property_id: pid, name: m.el.querySelector('#d-name').value || 'Drawing', geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter, count: r.count } })
             .then(function () { m.close(); App.toast('Saved to the property.'); select(pid); }).catch(function (x) { App.toast(x.message, 'err'); });
         };
       } });
@@ -69,7 +69,7 @@
     function measureOnly() {
       gis.draw({ title: 'Measure', modes: ['line', 'area'], doneLabel: sel ? 'Save to property' : 'Done', onDone: function (r) {
         if (!sel) { App.toast(r.mode === 'area' ? GIS.fmtArea(r.area) + ' · ' + GIS.fmtLen(r.perimeter) + ' perimeter' : GIS.fmtLen(r.length), null, 6000); return; }
-        App.post('drawings', { property_id: sel, name: r.mode === 'area' ? 'Area ' + GIS.fmtArea(r.area) : 'Line ' + GIS.fmtLen(r.length), geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter } }).then(function () { App.toast('Saved to the property.'); select(sel); });
+        App.post('drawings', { property_id: sel, name: r.mode === 'area' ? 'Area ' + GIS.fmtArea(r.area) : 'Line ' + GIS.fmtLen(r.length), geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter, count: r.count } }).then(function () { App.toast('Saved to the property.'); select(sel); });
       } });
     }
   });

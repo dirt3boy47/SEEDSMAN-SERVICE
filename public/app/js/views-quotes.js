@@ -226,8 +226,8 @@
       h += '<div class="grid2"><label class="field span2">Name on the quote<input data-f="name" value="' + esc(it.name || s.name) + '"></label></div>';
       // measuring
       if (s.measure !== 'none' || s.method === 'hedge') {
-        var m = it.measure || {}, src = it.geometry ? (GIS.modeOf(it.geometry) === 'area' ? 'Outlined on the map' + (m.area ? ' · ' + GIS.fmtArea(m.area) : '') : GIS.modeOf(it.geometry) === 'point' ? 'Marked on the map' : 'Measured on the map' + (m.length ? ' · ' + GIS.fmtLen(m.length) : '')) : 'Not on the map';
-        var compatible = S.drawings.filter(function (d) { return d.kind !== 'point' || s.measure === 'point'; }).length;
+        var m = it.measure || {}, src = it.geometry ? (GIS.modeOf(it.geometry) === 'area' ? 'Outlined on the map' + (m.area ? ' · ' + GIS.fmtArea(m.area) : '') : GIS.isPt(GIS.modeOf(it.geometry)) ? 'Marked on the map' + (GIS.toLatLngs(it.geometry).length > 1 ? ' · ' + GIS.toLatLngs(it.geometry).length + ' points' : '') : 'Measured on the map' + (m.length ? ' · ' + GIS.fmtLen(m.length) : '')) : 'Not on the map';
+        var compatible = S.drawings.filter(function (d) { return (d.kind !== 'point') !== (s.measure === 'point'); }).length;
         h += '<div class="measure-box"><span class="grow">' + icon('ruler').replace('class="i"', 'class="i" style="display:inline;vertical-align:-4px;width:16px;height:16px"') + ' ' + esc(src) + '</span>' +
           '<button class="btn sm" data-act="measure">' + icon(s.measure === 'point' ? 'pin' : s.measure === 'area' ? 'area' : 'line') + (it.geometry ? 'Re-measure' : 'Measure on map') + '</button>' +
           (compatible ? '<button class="btn sm" data-act="drawing">' + icon('layers') + 'Saved drawing</button>' : '') +
@@ -385,22 +385,22 @@
         if (s.measure !== 'none' && s.method !== 'hours') measure(it); else flash(it.id);
       });
     }
-    function modesFor(s) { return s.method === 'hedge' ? ['line', 'area'] : s.measure === 'area' ? ['area'] : s.measure === 'point' ? ['point'] : s.method === 'length' ? ['line', 'area'] : ['line']; }
+    function modesFor(s) { return s.method === 'hedge' ? ['line', 'area'] : s.measure === 'area' ? ['area'] : s.measure === 'point' ? ['points'] : s.method === 'length' ? ['line', 'area'] : ['line']; }
     function applyMeasure(it, res) {
       var s = svc(it), r1 = function (n) { return Math.round((n || 0) * 10) / 10; };
-      it.geometry = res.geometry; it.measure = { length: res.length != null ? r1(res.length) : null, area: res.area != null ? r1(res.area) : null, perimeter: res.perimeter != null ? r1(res.perimeter) : null };
+      it.geometry = res.geometry; it.measure = { length: res.length != null ? r1(res.length) : null, area: res.area != null ? r1(res.area) : null, perimeter: res.perimeter != null ? r1(res.perimeter) : null, count: res.count || null };
       if (s.method === 'hedge') {
         if (res.mode === 'area') { it.inputs.length = r1(res.length); it.inputs.depth = Math.max(0.1, r1(res.depth)); it.inputs.measuredArea = r1(res.area); }
         else it.inputs.length = r1(res.length);
         it.inputs.measuredLength = r1(res.length);
       } else if (s.method === 'area') it.inputs.qty = r1(res.area);
       else if (s.method === 'length') it.inputs.qty = r1(res.mode === 'area' ? res.perimeter : res.length);
-      else if (s.method === 'unit' && !it.inputs.qty) it.inputs.qty = 1;
+      else if (s.method === 'unit') it.inputs.qty = res.count || (it.inputs.qty || 1); // one per point tapped
     }
     function measure(it) {
       var s = svc(it), modes = modesFor(s);
       if (narrow()) showPane('map');
-      gis.draw({ title: (it.name || s.name), modes: modes, mode: it.geometry ? GIS.modeOf(it.geometry) : modes[0], pts: GIS.toLatLngs(it.geometry), doneLabel: 'Use in quote',
+      gis.draw({ title: (it.name || s.name), modes: modes, mode: it.geometry ? (GIS.isPt(GIS.modeOf(it.geometry)) && modes.indexOf('points') >= 0 ? 'points' : GIS.modeOf(it.geometry)) : modes[0], pts: GIS.toLatLngs(it.geometry), doneLabel: 'Use in quote',
         onDone: function (res) {
           applyMeasure(it, res);
           if (S.property.lat == null) setHouse(res.pts[0]);
@@ -412,14 +412,14 @@
         onCancel: function () { if (narrow()) showPane('quote'); } });
     }
     function drawingMenu(anchor, it) {
-      var s = svc(it), modes = modesFor(s), list = S.drawings.filter(function (d) { return modes.indexOf(d.kind) >= 0; });
+      var s = svc(it), modes = modesFor(s), list = S.drawings.filter(function (d) { return modes.indexOf(d.kind) >= 0 || (d.kind === 'point' && modes.indexOf('points') >= 0); });
       if (!list.length) { App.toast('No saved drawings of the right kind on this property.', 'warn'); return; }
       App.menu(anchor, '<div class="g">Saved site drawings</div>' + list.map(function (d) {
         var m = d.measure || {}; return '<button data-v="' + esc(d.id) + '">' + icon(d.kind === 'area' ? 'area' : d.kind === 'point' ? 'pin' : 'line') + '<span><b>' + esc(d.name) + '</b><small>' + (m.area ? GIS.fmtArea(m.area) : m.length ? GIS.fmtLen(m.length) : d.kind) + ' · ' + App.dateShort(d.updated_at) + '</small></span></button>';
       }).join(''), function (id) {
         var d = S.drawings.filter(function (x) { return x.id === id; })[0]; if (!d) return;
         var mm = GIS.measureOf(d.geometry);
-        applyMeasure(it, { mode: d.kind, geometry: d.geometry, length: mm.length, area: mm.area, perimeter: mm.perimeter, depth: mm.depth, pts: GIS.toLatLngs(d.geometry) });
+        applyMeasure(it, { mode: GIS.modeOf(d.geometry), geometry: d.geometry, length: mm.length, area: mm.area, perimeter: mm.perimeter, depth: mm.depth, count: mm.count, pts: GIS.toLatLngs(d.geometry) });
         it.drawingId = d.id; if (!it.name || it.name === s.name) it.name = d.name;
         dirty(); render(); flash(it.id);
       });

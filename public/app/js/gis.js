@@ -47,26 +47,29 @@
   var LIVE = { color: '#ffd400', weight: 3, opacity: 1, dashArray: '8 6', interactive: false };
   var CASING = { color: '#000', weight: 6, opacity: 0.45, interactive: false };
 
+  function isPt(m) { return m === 'point' || m === 'points'; }
   function toLatLngs(g) {
     if (!g) return [];
     if (g.type === 'Point') return [L.latLng(g.coordinates[1], g.coordinates[0])];
+    if (g.type === 'MultiPoint') return g.coordinates.map(function (p) { return L.latLng(p[1], p[0]); });
     var c = g.type === 'Polygon' ? g.coordinates[0].slice(0, -1) : g.coordinates;
     return c.map(function (p) { return L.latLng(p[1], p[0]); });
   }
   function toGeo(mode, lls) {
     var r = function (ll) { return [Math.round(ll.lng * 1e7) / 1e7, Math.round(ll.lat * 1e7) / 1e7]; };
     if (mode === 'point') return { type: 'Point', coordinates: r(lls[0]) };
+    if (mode === 'points') return { type: 'MultiPoint', coordinates: lls.map(r) };
     var c = lls.map(r);
     return mode === 'area' ? { type: 'Polygon', coordinates: [c.concat([c[0]])] } : { type: 'LineString', coordinates: c };
   }
-  function modeOf(g) { return !g ? null : g.type === 'Polygon' ? 'area' : g.type === 'Point' ? 'point' : 'line'; }
+  function modeOf(g) { return !g ? null : g.type === 'Polygon' ? 'area' : g.type === 'Point' ? 'point' : g.type === 'MultiPoint' ? 'points' : 'line'; }
   function fmtLen(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : (m >= 100 ? m.toFixed(1) : m.toFixed(2)) + ' m'; }
   function fmtArea(a) { return a >= 10000 ? (a / 10000).toFixed(3) + ' ha' : a.toFixed(a >= 100 ? 0 : 1) + ' m²'; }
   function measureOf(g) {
     var lls = toLatLngs(g), m = modeOf(g);
     if (m === 'area') { var a = Geo.ringArea(lls), p = Geo.perimeter(lls), b = Geo.bandSize(a, p); return { area: a, perimeter: p, length: b.length, depth: b.depth }; }
     if (m === 'line') return { length: Geo.pathLength(lls) };
-    return {};
+    return { count: lls.length };
   }
   function pinIcon(cls, ic) { return L.divIcon({ className: 'map-pin ' + (cls || ''), iconSize: [30, 30], iconAnchor: [15, 30], html: '<span>' + icon(ic || 'home') + '</span>' }); }
   function label(ll, text, cls) { return L.marker(ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: 'map-label ' + (cls || ''), iconSize: null, html: '<span>' + esc(text) + '</span>' }) }); }
@@ -221,13 +224,13 @@
     var snapPts = [];
     g.setShapes = function (list) {
       shapes.clearLayers(); snapPts = [];
-      var rank = function (s) { var m = modeOf(s.geometry); return m === 'area' ? -Geo.ringArea(toLatLngs(s.geometry)) : m === 'line' ? 1e12 : 2e12; };
+      var rank = function (s) { var m = modeOf(s.geometry); return m === 'area' ? -Geo.ringArea(toLatLngs(s.geometry)) : m === 'line' ? 1e12 : 2e12; }; // points on top
       (list || []).filter(function (s) { return s.geometry; }).sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (s) {
         toLatLngs(s.geometry).forEach(function (ll) { snapPts.push(ll); });
         if (!s.geometry) return;
         var lls = toLatLngs(s.geometry), m = modeOf(s.geometry), color = s.color || '#3ddc84', layer;
-        if (m === 'point') {
-          layer = L.circleMarker(lls[0], { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 });
+        if (isPt(m)) {
+          layer = L.featureGroup(lls.map(function (ll) { return L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }); }));
         } else {
           var mk = m === 'area' ? L.polygon : L.polyline;
           shapes.addLayer(mk(lls, { color: '#000', weight: s.faded ? 5 : 8, opacity: s.faded ? 0.25 : 0.4, interactive: false, fill: false }));
@@ -235,7 +238,7 @@
         }
         if (opts.onShapeClick && s.id) layer.on('click', function (e) { if (M.on) return; L.DomEvent.stopPropagation(e); opts.onShapeClick(s.id); }); // while drawing, taps go through to the map
         shapes.addLayer(layer);
-        if (s.label) shapes.addLayer(label(centreOf(s.geometry), s.label, m === 'area' ? 'mid' : ''));
+        if (s.label) shapes.addLayer(label(m === 'points' ? lls[0] : centreOf(s.geometry), s.label, m === 'area' ? 'mid' : ''));
       });
     };
     g.fit = function (extra) {
@@ -255,22 +258,24 @@
     function stats() {
       var l = lls(), st = { n: l.length };
       if (M.mode === 'area' && l.length >= 3) { st.area = Geo.ringArea(l); st.perimeter = Geo.perimeter(l); var b = Geo.bandSize(st.area, st.perimeter); st.length = b.length; st.depth = b.depth; }
-      else if (M.mode !== 'point') st.length = Geo.pathLength(l);
+      else if (!isPt(M.mode)) st.length = Geo.pathLength(l);
       return st;
     }
     function renderLive() {
       live.clearLayers();
       var l = lls(), st = stats();
       if (M.mode === 'area' && l.length >= 3) { live.addLayer(L.polygon(l, Object.assign({}, CASING, { fill: false }))); live.addLayer(L.polygon(l, Object.assign({}, LIVE, { fillColor: '#ffd400', fillOpacity: 0.18 }))); }
-      else if (M.mode !== 'point' && l.length >= 2) { live.addLayer(L.polyline(l, CASING)); live.addLayer(L.polyline(l, LIVE)); }
+      else if (!isPt(M.mode) && l.length >= 2) { live.addLayer(L.polyline(l, CASING)); live.addLayer(L.polyline(l, LIVE)); }
       M.pts.forEach(function (p, i) {
-        if (M.mode !== 'point' && !p.h && i !== 0 && i !== M.pts.length - 1) return;
-        var mk = L.marker(p.ll, { draggable: true, keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'ms-vertex' + (i === 0 ? ' first' : ''), iconSize: [18, 18], iconAnchor: [9, 9] }) });
+        if (!isPt(M.mode) && !p.h && i !== 0 && i !== M.pts.length - 1) return;
+        var mk = L.marker(p.ll, { draggable: true, keyboard: false, zIndexOffset: 1000, icon: M.mode === 'points'
+          ? L.divIcon({ className: 'ms-point', iconSize: [24, 24], iconAnchor: [12, 12], html: '<span>' + (i + 1) + '</span>' })
+          : L.divIcon({ className: 'ms-vertex' + (i === 0 ? ' first' : ''), iconSize: [18, 18], iconAnchor: [9, 9] }) });
         mk.on('drag', function () { p.ll = mk.getLatLng(); live.eachLayer(function (x) { if (x instanceof L.Polyline) x.setLatLngs(lls()); }); updatePanel(); });
         mk.on('dragend', function () { M.lastTrace = Date.now(); renderLive(); });
         live.addLayer(mk);
       });
-      if (l.length >= 2 && M.mode !== 'point') {
+      if (l.length >= 2 && !isPt(M.mode)) {
         var isArea = M.mode === 'area' && l.length >= 3;
         live.addLayer(label(isArea ? L.polygon(l).getBounds().getCenter() : l[l.length - 1], isArea ? fmtArea(st.area) : fmtLen(st.length), 'live' + (isArea ? ' mid' : '')));
       }
@@ -282,13 +287,14 @@
       if (M.mode === 'line') rows.push(['Length', st.n >= 2 ? fmtLen(st.length) : '—']);
       if (M.mode === 'area') { rows.push(['Area', st.area != null ? fmtArea(st.area) : '—']); rows.push(['Perimeter', st.perimeter != null ? fmtLen(st.perimeter) : '—']); }
       if (M.mode === 'point') rows.push(['Point', st.n ? 'Placed' : '—']);
-      rows.push(['Points', String(st.n)]);
+      if (M.mode === 'points') rows.push(['Points placed', String(st.n)]);
+      if (M.mode !== 'points') rows.push(['Points', String(st.n)]);
       panel.querySelector('.ms-rows').innerHTML = rows.map(function (r, i) { return '<div class="ms-row' + (i ? '' : ' big') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('');
-      panel.querySelector('.ms-hint').textContent = M.mode === 'point' ? 'Tap the map to place the point. Drag it to move it.' : M.free
+      panel.querySelector('.ms-hint').textContent = M.mode === 'points' ? 'Tap each tree or spot — every tap adds a point. Drag one to move it; Undo removes the last.' : M.mode === 'point' ? 'Tap the map to place the point. Drag it to move it.' : M.free
         ? 'Trace with one finger, the mouse or a pencil. Two fingers move the map. Taps add straight bits.'
         : M.mode === 'area' ? 'Tap the corners of the area — taps snap to nearby corners of other shapes. Drag a point to move it.' : 'Tap along the line to add points — taps snap to nearby corners. Drag a point to move it.';
       panel.querySelectorAll('.seg button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-m') === M.mode); });
-      panel.querySelector('.ms-free').hidden = M.mode === 'point';
+      panel.querySelector('.ms-free').hidden = isPt(M.mode);
       panel.querySelector('[data-a=undo]').disabled = panel.querySelector('[data-a=clear]').disabled = !M.pts.length;
       panel.querySelector('[data-a=done]').disabled = M.pts.length < (M.mode === 'area' ? 3 : M.mode === 'line' ? 2 : 1);
     }
@@ -300,7 +306,7 @@
     }
     function onClick(e) {
       if (!M.on || Date.now() - M.lastTrace < 450) return;
-      var ll = snap(e.latlng) || e.latlng;
+      var ll = M.mode === 'points' ? e.latlng : (snap(e.latlng) || e.latlng); // separate trees never merge
       if (M.mode === 'point') M.pts = [{ ll: ll, h: true, cut: true }];
       else M.pts.push({ ll: ll, h: true, cut: true });
       renderLive();
@@ -312,7 +318,7 @@
     function onDown(e) {
       if (e.pointerType === 'touch') touches[e.pointerId] = true;
       if (M.trace && Object.keys(touches).length > 1) { cancelTrace(); return; }
-      if (!M.on || !M.free || M.mode === 'point' || !inMap(e) || (e.pointerType === 'mouse' && e.button !== 0) || Object.keys(touches).length > 1) return;
+      if (!M.on || !M.free || isPt(M.mode) || !inMap(e) || (e.pointerType === 'mouse' && e.button !== 0) || Object.keys(touches).length > 1) return;
       if (e.pointerType !== 'touch') { e.stopPropagation(); e.preventDefault(); }
       M.trace = { id: e.pointerId, start: M.pts.length, cps: [cp(e)], moved: false };
     }
@@ -342,13 +348,13 @@
     window.addEventListener('pointermove', onMove, { capture: true, passive: false });
     window.addEventListener('pointerup', onUp, true);
     window.addEventListener('pointercancel', onCancelPtr, true);
-    function setFree(v) { M.free = v; if (v && M.mode !== 'point') map.dragging.disable(); else map.dragging.enable(); updatePanel(); }
+    function setFree(v) { M.free = v; if (v && !isPt(M.mode)) map.dragging.disable(); else map.dragging.enable(); updatePanel(); }
 
     function finish(ok) {
       var st = stats(), o = M.o || {}, l = lls();
-      var res = ok ? { mode: M.mode, pts: l, geometry: toGeo(M.mode, l), length: st.length, area: st.area, perimeter: st.perimeter, depth: st.depth } : null;
+      var res = ok ? { mode: M.mode, pts: l, geometry: toGeo(M.mode, l), length: st.length, area: st.area, perimeter: st.perimeter, depth: st.depth, count: l.length } : null;
       M.on = false; M.trace = null; M.pts = []; M.o = null;
-      live.clearLayers(); map.dragging.enable(); container.classList.remove('measuring');
+      live.clearLayers(); map.dragging.enable(); if (interactive) map.doubleClickZoom.enable(); container.classList.remove('measuring');
       if (panel) { panel.remove(); panel = null; }
       if (ok && o.onDone) o.onDone(res); else if (!ok && o.onCancel) o.onCancel();
     }
@@ -359,7 +365,8 @@
       M.pts = (o.pts || []).map(function (ll, i) { return { ll: L.latLng(ll.lat, ll.lng), h: o.pts.length <= 40, cut: i === 0 || o.pts.length <= 40 }; });
       container.classList.add('measuring');
       panel = document.createElement('div'); panel.className = 'ms panel';
-      var names = { line: ['line', 'Line'], area: ['area', 'Area'], point: ['pin', 'Point'] };
+      var names = { line: ['line', 'Line'], area: ['area', 'Area'], point: ['pin', 'Point'], points: ['pin', 'Points'] };
+      map.doubleClickZoom.disable(); // quick taps place points instead of zooming
       panel.innerHTML = '<div class="ms-h"><b>' + esc(o.title || 'Measure') + '</b><button class="ib sm" data-a="cancel" title="Cancel">' + icon('close') + '</button></div>' +
         (M.modes.length > 1 ? '<div class="seg">' + M.modes.map(function (m) { return '<button type="button" data-m="' + m + '">' + icon(names[m][0]) + names[m][1] + '</button>'; }).join('') + '</div>' : '') +
         '<label class="check ms-free"><input type="checkbox"> Freehand: trace a winding line or outline</label>' +
@@ -472,5 +479,5 @@
     input.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
   }
 
-  window.GIS = { configure: configure, suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
+  window.GIS = { isPt: isPt, configure: configure, suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
 })();

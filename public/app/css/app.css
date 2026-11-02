@@ -470,3 +470,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .g-check.bad { background: rgba(201,42,42,.08); border-color: rgba(201,42,42,.25); }
 .g-check .fix { margin-top: 6px; color: var(--ink); }
 .g-check code { background: var(--chip); padding: 1px 5px; border-radius: 5px; font-size: 12px; user-select: all; }
+/* multi-point placement (trees) */
+.ms-point { background: none; border: 0; }
+.ms-point span { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #ffb300; color: #1b1300; border: 2px solid #fff; font-size: 11px; font-weight: 800; box-shadow: 0 1px 4px rgba(0,0,0,.5); }

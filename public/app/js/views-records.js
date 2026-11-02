@@ -120,7 +120,7 @@
       gis.setShapes(data.drawings.map(function (d) { return { id: d.id, geometry: d.geometry, color: d.color || '#3ddc84', label: d.name }; }));
       if (!gis.fit() && p.address) GIS.search([p.address, p.suburb].join(', '), gis.map).then(function (r) { if (r[0]) { gis.map.setView([r[0].lat, r[0].lng], 19); App.toast('Found the address. Drag the pin onto the house and save it.', 'warn', 6000); setPinAt(L.latLng(r[0].lat, r[0].lng)); } }).catch(function () {});
       ctx.el.querySelector('#left').innerHTML = card('Site drawings', data.drawings.length ? '<div class="list">' + data.drawings.map(function (d) {
-        var m = d.measure || {}, meas = d.kind === 'area' ? (m.area ? GIS.fmtArea(m.area) : '') + (m.perimeter ? ' · ' + GIS.fmtLen(m.perimeter) + ' perimeter' : '') : d.kind === 'line' ? (m.length ? GIS.fmtLen(m.length) : '') : 'Point';
+        var m = d.measure || {}, meas = d.kind === 'area' ? (m.area ? GIS.fmtArea(m.area) : '') + (m.perimeter ? ' · ' + GIS.fmtLen(m.perimeter) + ' perimeter' : '') : d.kind === 'line' ? (m.length ? GIS.fmtLen(m.length) : '') : (GIS.toLatLngs(d.geometry).length > 1 ? GIS.toLatLngs(d.geometry).length + ' points' : 'Point');
         return '<div class="li" data-d="' + esc(d.id) + '"><span class="avatar">' + icon(d.kind === 'area' ? 'area' : d.kind === 'point' ? 'pin' : 'line') + '</span><span class="grow"><b>' + esc(d.name) + '</b><small>' + esc(meas) + ' · ' + App.dateShort(d.updated_at) + (d.service ? ' · from a quote' : '') + '</small></span>' +
           '<button class="ib sm" data-da="redraw" title="Redraw">' + icon('edit') + '</button><button class="ib sm" data-da="del" title="Delete">' + icon('trash') + '</button></div>';
       }).join('') + '</div>' : '<div class="empty" style="padding:18px">Draw lines, areas and points on the map with <b>Draw</b>. Measured quote items are saved here too.</div>', '<button class="btn sm" id="draw2">' + icon('ruler') + 'Draw</button>');
@@ -135,10 +135,10 @@
     function showPin() { var p = data.property; gis.setPin(moved || (p.lat != null ? L.latLng(p.lat, p.lng) : null), { draggable: true, title: 'House — drag to move', onMove: setPinAt }); }
     function setPinAt(ll) { moved = ll; ctx.el.querySelector('#pin-bar').hidden = false; showPin(); }
     function newDrawing() {
-      gis.draw({ title: 'New site drawing', modes: ['line', 'area', 'point'], doneLabel: 'Save drawing', onDone: function (r) {
-        var m = App.modal('<h2>Name this drawing</h2><p class="sub">' + (r.mode === 'area' ? GIS.fmtArea(r.area) + ' · ' + GIS.fmtLen(r.perimeter) + ' perimeter' : r.mode === 'line' ? GIS.fmtLen(r.length) : 'Point') + '</p><label class="field">Name<input id="d-name" placeholder="e.g. Front hedge, back lawn"></label><label class="field" style="margin-top:10px">Notes<input id="d-notes"></label><div class="actions"><button class="btn" data-close>Discard</button><button class="btn primary" id="ok">Save drawing</button></div>');
+      gis.draw({ title: 'New site drawing', modes: ['line', 'area', 'points'], doneLabel: 'Save drawing', onDone: function (r) {
+        var m = App.modal('<h2>Name this drawing</h2><p class="sub">' + (r.mode === 'area' ? GIS.fmtArea(r.area) + ' · ' + GIS.fmtLen(r.perimeter) + ' perimeter' : r.mode === 'line' ? GIS.fmtLen(r.length) : r.count + (r.count === 1 ? ' point' : ' points')) + '</p><label class="field">Name<input id="d-name" placeholder="e.g. Front hedge, back lawn"></label><label class="field" style="margin-top:10px">Notes<input id="d-notes"></label><div class="actions"><button class="btn" data-close>Discard</button><button class="btn primary" id="ok">Save drawing</button></div>');
         m.el.querySelector('#ok').onclick = function () {
-          App.post('drawings', { property_id: id, name: val(m.el, 'd-name') || (r.mode === 'area' ? 'Area' : r.mode === 'line' ? 'Line' : 'Point'), notes: val(m.el, 'd-notes'), geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter } })
+          App.post('drawings', { property_id: id, name: val(m.el, 'd-name') || (r.mode === 'area' ? 'Area' : r.mode === 'line' ? 'Line' : r.count + ' trees'), notes: val(m.el, 'd-notes'), geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter, count: r.count } })
             .then(function () { m.close(); App.toast('Drawing saved to the property.'); load(); }).catch(function (x) { App.toast(x.message, 'err'); });
         };
       } });
@@ -147,7 +147,7 @@
       var b = e.target.closest('[data-da]'); if (!b) return;
       var d = data.drawings.filter(function (x) { return x.id === b.closest('[data-d]').getAttribute('data-d'); })[0];
       if (b.getAttribute('data-da') === 'del') App.confirm('Delete ' + d.name + '?', 'The drawing is removed from the property. Quotes that used it keep their measurements.', 'Delete', true).then(function (ok) { if (ok) App.del('drawings/' + d.id).then(load); });
-      else gis.draw({ title: 'Redraw ' + d.name, modes: [d.kind], pts: GIS.toLatLngs(d.geometry), doneLabel: 'Save', onDone: function (r) { App.put('drawings/' + d.id, { geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter } }).then(function () { App.toast('Drawing updated.'); load(); }); } });
+      else gis.draw({ title: 'Redraw ' + d.name, modes: [d.kind], pts: GIS.toLatLngs(d.geometry), doneLabel: 'Save', onDone: function (r) { App.put('drawings/' + d.id, { geometry: r.geometry, measure: { length: r.length, area: r.area, perimeter: r.perimeter, count: r.count } }).then(function () { App.toast('Drawing updated.'); load(); }); } });
     });
     function load() { App.get('properties/' + encodeURIComponent(id)).then(function (d) { data = d; render(); }).catch(function (e) { App.toast(e.message, 'err'); }); }
     load();

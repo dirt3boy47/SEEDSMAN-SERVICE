@@ -15,7 +15,8 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    **home base** (Settings) by road (OSRM; straight line × 1.35 if it doesn't answer).
 2. **Add service** — pick from the catalogue (hedge trimming, lawn mowing, weeding, mulch, edging, pruning, stump grinding,
    labour…). Services measured on the map open the GeoCanvas measure tool straight away: **Line**, **Area** or **Point**,
-   tap or **Freehand** trace for curves, drag points, undo. The measured length/area goes into the quantity.
+   tap or **Freehand** trace for curves, drag points, undo. Services priced **each** (pruning, stump grinding, trees) open in
+   **Points** mode: tap every tree — each tap adds a numbered point instantly and the count becomes the quantity. The measured length/area goes into the quantity.
    **Saved drawing** reuses a drawing already on the property.
 3. Each service card expands to show quantities (hedges: length, height, depth, condition and the faces to cut — Top, Front,
    Back, LHS, RHS), the cost build-up (labour hours × labour cost, materials, equipment) and the price; any price can be overridden.
