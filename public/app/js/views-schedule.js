@@ -28,12 +28,21 @@
     el.className = 'wide';
     if (ctx.query.date) S.focus = ctx.query.date;
 
-    function settings() { return S.settings || { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5 }; }
+    function settings() { return S.settings || { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5, workDays: [1, 2, 3, 4, 5] }; }
+    function dayLen() { var st = settings(); return hm(st.dayEnd) - hm(st.dayStart); }
+    function daysFor(mh, men) { var t = ceilTo((mh || 0) / Math.max(1, men) * 60, SNAP), L = dayLen(); return t <= L + 30 ? 1 : Math.ceil((t - 30) / L - 1e-9); }
     function range() { var st = settings(), from = Math.max(0, Math.floor(hm(st.dayStart) / 60) * 60 - 60); if (S.minFrom != null) from = Math.max(0, Math.min(from, S.minFrom)); return { from: from, to: Math.min(24 * 60, Math.ceil(hm(st.dayEnd) / 60) * 60 + 120) }; }
     function daysFit() { var w = el.querySelector('.cal') ? el.querySelector('.cal').clientWidth : window.innerWidth; return Math.max(1, Math.min(7, Math.floor((w - 56) / 96))); }
 
     // ---------------- model ----------------
-    function jobDur(j) { return j.manHours ? Math.max(SNAP, ceilTo(j.manHours / Math.max(1, j.men) * 60, SNAP)) : Math.max(SNAP, j.endMin - j.startMin); }
+    function jobDur(j) {
+      var mh = j.flow ? (j.flowTotal || j.manHours) : j.manHours;
+      var full = mh ? Math.max(SNAP, ceilTo(mh / Math.max(1, j.men) * 60, SNAP)) : Math.max(SNAP, j.endMin - j.startMin);
+      if (!j.flow) return full;
+      var cap = hm(settings().dayEnd) - j.startMin; // same rule as the server: up to 30 min over stays on one day
+      return full <= cap + 30 || cap < 30 ? full : cap;
+    }
+    function isHead(j) { return !(j.parts > 1) || j.id === j.head; }
     function pairKey(a, b, date) { return a.lat.toFixed(4) + ',' + a.lng.toFixed(4) + '>' + b.lat.toFixed(4) + ',' + b.lng.toFixed(4) + '@' + date; }
     function roadKey(a, b, date, min) { return pairKey(a, b, date) + 'T' + String(Math.floor(min / 60)).padStart(2, '0'); }
     function roadFor(a, b, date, min) {
@@ -71,7 +80,8 @@
       var s = split(j.start), e = split(j.end);
       return { id: j.id, quote_id: j.quote_id, quote_number: j.quote_number, customer: j.customer, phone: j.phone, address: j.address, suburb: j.suburb, lat: j.lat, lng: j.lng,
         crew: j.crew, men: j.men || j.crew_size || 2, manHours: j.work_hours != null ? +j.work_hours : null, date: s.date, startMin: s.min, endMin: e.date === s.date ? e.min : e.min + 1440,
-        travel: j.travel_minutes || 0, status: j.status, total: j.total, services: j.services, notes: j.notes, actual: j.actual_hours };
+        travel: j.travel_minutes || 0, status: j.status, total: j.total, services: j.services, notes: j.notes, actual: j.actual_hours,
+        project: j.project_id, part: j.part || 1, parts: j.parts || 1, head: j.project_head, openHours: j.project_open_hours != null ? +j.project_open_hours : null };
     }
     function group(date, crew, except) { return S.jobs.filter(function (j) { return j.date === date && j.crew === crew && j !== except; }).sort(function (a, b) { return a.startMin - b.startMin; }); }
     /** Lay out one crew's day. Each job keeps its chosen start unless it would overlap the previous job plus the drive;
@@ -97,12 +107,23 @@
     }
     function payload(list) {
       return list.map(function (j) {
-        return { id: j.id || undefined, quote_id: j.id ? undefined : j.quote_id, start: local(j.date, j.startMin), end: local(j.date, j.endMin), crew: j.crew, men: j.men, man_hours: j.manHours, travel_minutes: j.travel, sequence: j.seq };
+        var o = { id: j.id || undefined, quote_id: j.id ? undefined : j.quote_id, start: local(j.date, j.startMin), end: local(j.date, j.endMin), crew: j.crew, men: j.men, man_hours: j.manHours, travel_minutes: j.travel, sequence: j.seq };
+        if (j.flow) { o.flow = true; o.flow_total = j.flowTotal || j.manHours; delete j.flow; delete j.flowTotal; }
+        return o;
       });
+    }
+    function toastFlow(flowed) {
+      var big = (Array.isArray(flowed) ? flowed : flowed ? [flowed] : []).filter(function (f) { return f.days.length > 1 || f.parts > 1; })[0];
+      if (!big) return false;
+      App.toast(big.customer + ' — ' + (big.days.length > 1 ? big.days.length + ' days to go: ' : 'next day: ') + big.days.map(function (d) { return new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }); }).join(', ') + '.', null, 7000);
+      return true;
     }
     function apply(list, msg) {
       if (!list.length) { load(); return Promise.resolve(); }
-      return App.post('schedule/apply', { jobs: payload(list) }).then(function () { if (msg) App.toast(msg); return load(); })
+      return App.post('schedule/apply', { jobs: payload(list) }).then(function (r) {
+        if (!toastFlow(r.flowed) && msg) App.toast(msg);
+        return load();
+      })
         .catch(function (e) { App.toast(e.message, 'err', 6000); return load(); });
     }
 
@@ -158,7 +179,7 @@
       el.querySelector('#tray').innerHTML = S.waiting.length ? S.waiting.map(function (q) {
         var men = q.crew_size || 2, mh = +q.man_hours || 0, t = ceilTo(mh / men * 60, SNAP);
         return '<div class="tcard' + (ctx.query.quote === q.id ? ' flash' : '') + '" data-q="' + esc(q.id) + '"><span class="grip" title="Drag onto the calendar">' + icon('grip') + '</span><div class="grow"><b>' + esc(q.customer) + '</b><small>' + esc(q.suburb || q.address) + ' · ' + esc(q.number) + '</small>' +
-          '<small>' + esc((q.services || 'Hedge trimming').replace(/,/g, ', ')) + '</small><div class="tmeta"><span class="tag">' + (mh ? mh + ' man-h' : 'No estimate') + '</span><span class="tag">' + men + ' men → ' + dur(t || 60) + '</span>' + (+q.picker ? '<span class="tag warn">Cherry picker</span>' : '') + (q.lat == null ? '<span class="tag warn">No pin</span>' : '') + '</div></div><b class="num">' + money(q.total, 0) + '</b></div>';
+          '<small>' + esc((q.services || 'Hedge trimming').replace(/,/g, ', ')) + '</small><div class="tmeta"><span class="tag">' + (mh ? mh + ' man-h' : 'No estimate') + '</span><span class="tag">' + men + ' men → ' + dur(t || 60) + '</span>' + (daysFor(mh, men) > 1 ? '<span class="tag info">' + daysFor(mh, men) + ' days</span>' : '') + (+q.picker ? '<span class="tag warn">Cherry picker</span>' : '') + (q.lat == null ? '<span class="tag warn">No pin</span>' : '') + '</div></div><b class="num">' + money(q.total, 0) + '</b></div>';
       }).join('') : '<div class="empty" style="padding:22px 10px">' + icon('check') + '<b>Nothing waiting</b>Accepted quotes appear here, ready to drag onto the calendar. Tap <b>Add</b> to accept a quote the customer said yes to.</div>';
       if (ctx.query.quote) { var f = el.querySelector('.tcard.flash'); if (f) { f.scrollIntoView({ block: 'center' }); App.toast('Drag ' + f.querySelector('b').textContent + ' onto a day to book it.'); } ctx.query.quote = null; }
     }
@@ -243,7 +264,7 @@
           var pos = 'left:calc(' + (lane * w) + '% + 3px);width:calc(' + w + '% - 6px);';
           if (j.travel > 0) html += '<div class="cal-travel' + (j.guess ? ' guess' : '') + '" style="' + pos + 'top:' + ((j.startMin - j.travel - r.from) / 60 * HOUR) + 'px;height:' + (j.travel / 60 * HOUR) + 'px" title="Driving from the previous job' + (j.guess ? ' (estimate — a property has no pin)' : '') + '">' + (j.travel >= 15 ? icon('truck') + '<span>' + j.travel + ' min</span>' : '') + '</div>';
           html += '<div class="cal-job s-' + j.status.toLowerCase().replace(/\s+/g, '-') + '" data-j="' + esc(j.id) + '" style="' + pos + 'top:' + top + 'px;height:' + h + 'px">' +
-            '<b>' + esc(j.customer) + '</b><small class="t">' + clock(j.startMin) + '–' + clock(j.endMin) + '</small>' + (h > 40 ? '<small>' + esc(j.suburb || j.address) + '</small>' : '') +
+            (j.parts > 1 ? '<span class="daytag">Day ' + j.part + '/' + j.parts + '</span>' : '') + '<b>' + esc(j.customer) + '</b><small class="t">' + clock(j.startMin) + '–' + clock(j.endMin) + '</small>' + (h > 40 ? '<small>' + esc(j.suburb || j.address) + '</small>' : '') +
             (h > 68 ? '<small>' + (j.manHours ? j.manHours + ' man-h · ' : '') + j.men + ' men' + (crews.length > 1 || S.crews.length > 1 ? ' · ' + esc(j.crew) : '') + '</small>' : '') + '</div>';
         });
         return html + '</div>';
@@ -305,7 +326,7 @@
       var jb = e.target.closest('.cal-job');
       if (jb) {
         var j = S.jobs.filter(function (x) { return x.id === jb.getAttribute('data-j'); })[0];
-        startDrag(e, { job: j, label: j.customer, dur: j.endMin - j.startMin, grabY: e.clientY - jb.getBoundingClientRect().top }, jb);
+        startDrag(e, { job: j, label: j.customer + (j.parts > 1 ? ' · day ' + j.part : ''), dur: j.endMin - j.startMin, grabY: e.clientY - jb.getBoundingClientRect().top }, jb);
       }
     });
     window.addEventListener('pointermove', onMove);
@@ -320,7 +341,7 @@
     function bookQuote(q, date, min) {
       var crew = S.crew, list = group(date, crew);
       markAttached(list);
-      var nj = { id: null, quote_id: q.id, customer: q.customer, lat: q.lat, lng: q.lng, crew: crew, men: q.crew_size || 2, manHours: +q.man_hours || 1, date: date, startMin: min, endMin: min + 60, desired: min, attached: false, status: 'Scheduled' };
+      var nj = { id: null, quote_id: q.id, customer: q.customer, lat: q.lat, lng: q.lng, crew: crew, men: q.crew_size || 2, manHours: +q.man_hours || 1, date: date, startMin: min, endMin: min + 60, desired: min, attached: false, status: 'Scheduled', flow: true };
       list.push(nj);
       ensureRoads([list]).then(function () {
         arrange(list);
@@ -341,7 +362,9 @@
       });
     }
     function moveJob(j, date, min) {
-      relayout(j, { date: date, desired: min, attached: false }).then(function (all) {
+      var ch = { date: date, desired: min, attached: false };
+      if (isHead(j) && j.status !== 'Completed') { ch.flow = true; ch.flowTotal = j.parts > 1 ? j.openHours : j.manHours; }
+      relayout(j, ch).then(function (all) {
         apply(all, j.startMin !== min ? 'Moved to ' + clock(j.startMin) + ' to leave ' + j.travel + ' min to drive from the job before.' : null);
       });
     }
@@ -349,9 +372,11 @@
 
     // ---------------- dialogs ----------------
     function jobModal(j) {
-      var m = App.modal('<h2>' + esc(j.customer) + '</h2><p class="sub">' + esc([j.address, j.suburb].filter(Boolean).join(', ')) + ' · <a href="#/quotes/' + esc(j.quote_id) + '">' + esc(j.quote_number) + '</a> · ' + money(j.total) + '</p>' +
+      var proj = j.parts > 1, mhNow = proj ? (j.openHours != null ? j.openHours : j.manHours) : j.manHours;
+      var m = App.modal('<h2>' + esc(j.customer) + (proj ? ' <span class="tag info">Day ' + j.part + ' of ' + j.parts + '</span>' : '') + '</h2><p class="sub">' + esc([j.address, j.suburb].filter(Boolean).join(', ')) + ' · <a href="#/quotes/' + esc(j.quote_id) + '">' + esc(j.quote_number) + '</a> · ' + money(j.total) + '</p>' +
+        (proj ? '<p class="muted small" style="margin-top:-4px">A multi-day job. Changing the men or man-hours re-spreads the days still to do. Moving day 1 moves them all; moving a later day moves just that day.</p>' : '') +
         '<div class="crewbox"><div><div class="field">Men on the job</div><div class="stepper"><button class="ib" data-men="-1" aria-label="One fewer">−</button><b id="j-men">' + j.men + '</b><button class="ib" data-men="1" aria-label="One more">+</button></div></div>' +
-        '<div><div class="field">Man-hours</div><input id="j-mh" class="input" type="number" min="0.25" step="0.25" value="' + (j.manHours || '') + '" style="width:110px"></div>' +
+        '<div><div class="field">' + (proj ? 'Man-hours left (all days)' : 'Man-hours') + '</div><input id="j-mh" class="input" type="number" min="0.25" step="0.25" value="' + (mhNow || '') + '" style="width:110px"></div>' +
         '<div class="crew-out"><small>Job time</small><b id="j-time"></b><small id="j-end"></small></div></div>' +
         '<div class="grid2" style="margin-top:12px"><label class="field">Date<input id="j-date" type="date" value="' + j.date + '"></label><label class="field">Start<input id="j-start" type="time" step="900" value="' + local(j.date, j.startMin).slice(11) + '"></label>' +
         '<label class="field">Crew<select id="j-crew">' + S.crews.map(function (c) { return '<option' + (c === j.crew ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
@@ -359,32 +384,45 @@
         '<label class="field">Actual hours (after the job)<input id="j-actual" type="number" min="0" step="0.25" value="' + (j.actual || '') + '"></label><span></span>' +
         '<label class="field span2">Notes for the crew<textarea id="j-notes">' + esc(j.notes || '') + '</textarea></label></div>' +
         (j.travel ? '<p class="muted small">' + j.travel + ' min from the crew’s previous job, including ' + settings().bufferMinutes + ' min to park' + (j.travelInfo && j.travelInfo.low != null ? ' (drive ' + j.travelInfo.low + '–' + j.travelInfo.high + ' min, ' + (j.travelInfo.source === 'google' ? 'Google traffic' : 'by road') + ')' : '') + (j.guess ? ' (estimated — a property has no house pin)' : '') + '.</p>' : '') +
-        '<div class="actions"><a class="btn" href="#/jobs/' + esc(j.id) + '">' + icon('check') + (j.status === 'Completed' ? 'Job page' : 'Close out / photos') + '</a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
+        '<div class="actions"><a class="btn" href="#/jobs/' + esc(j.id) + '">' + icon('check') + (j.status === 'Completed' ? 'Job page' : proj && j.part < j.parts ? 'Check in / photos' : 'Close out / photos') + '</a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + 'Directions</a>' +
+        (j.status !== 'Completed' ? '<button class="btn" id="j-day">' + icon('plus') + 'Add another day</button>' : '') +
         '<button class="btn ghost" id="j-un" style="color:var(--danger)">Unschedule</button><span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="j-ok">Save</button></div>', { noFocus: true });
       var men = j.men, q = function (id) { return m.el.querySelector('#' + id); };
       function upd() {
-        var mh = parseFloat(q('j-mh').value) || 0, t = mh ? Math.max(SNAP, ceilTo(mh / men * 60, SNAP)) : j.endMin - j.startMin, st = q('j-start').value ? hm(q('j-start').value) : j.startMin;
-        q('j-men').textContent = men; q('j-time').textContent = dur(t); q('j-end').textContent = 'finishes about ' + clock(st + t);
+        var mh = parseFloat(q('j-mh').value) || 0, t = mh ? Math.max(SNAP, ceilTo(mh / men * 60, SNAP)) : j.endMin - j.startMin, st = q('j-start').value ? hm(q('j-start').value) : j.startMin, nd = daysFor(mh, men);
+        q('j-men').textContent = men; q('j-time').textContent = nd > 1 ? 'About ' + nd + ' days' : dur(t); q('j-end').textContent = nd > 1 ? dur(t) + ' of work for ' + men + ' men' : 'finishes about ' + clock(st + t);
       }
       m.el.addEventListener('click', function (e) { var b = e.target.closest('[data-men]'); if (!b) return; men = Math.max(1, Math.min(12, men + +b.getAttribute('data-men'))); upd(); });
       ['j-mh', 'j-start'].forEach(function (id) { q(id).addEventListener('input', upd); });
       upd();
       q('j-un').onclick = function () {
-        App.confirm('Unschedule ' + j.customer + '?', 'The job goes back to “To schedule”. The quote stays accepted.', 'Unschedule', true).then(function (ok) {
+        App.confirm(proj ? 'Unschedule all the days of ' + j.customer + '?' : 'Unschedule ' + j.customer + '?', (proj ? 'Every day still to do is taken off the calendar. Days already checked in stay. ' : '') + 'The job goes back to “To schedule”. The quote stays accepted.', 'Unschedule', true).then(function (ok) {
           if (!ok) return;
           var all = group(j.date, j.crew); markAttached(all);
           var rest = all.filter(function (x) { return x !== j; });
           App.del('jobs/' + j.id).then(function () { S.jobs = S.jobs.filter(function (x) { return x !== j; }); return ensureRoads([rest]); }).then(function () { arrange(rest); return apply(rest, 'Unscheduled — it is back in To schedule.'); });
         });
       };
+      var dayBtn = q('j-day');
+      if (dayBtn) dayBtn.onclick = function () {
+        dayBtn.disabled = true;
+        App.post('jobs/' + j.id + '/addday', { men: men }).then(function (r) { m.close(); toastFlow(r.flowed) || App.toast('Another day added.'); return load(); }).catch(function (x) { dayBtn.disabled = false; App.toast(x.message, 'err', 6000); });
+      };
       q('j-ok').onclick = function () {
-        var changes = { men: men, manHours: parseFloat(q('j-mh').value) || j.manHours, crew: q('j-crew').value, date: q('j-date').value || j.date };
-        var newStart = q('j-start').value ? hm(q('j-start').value) : j.startMin;
-        if (newStart !== j.startMin || changes.date !== j.date) { changes.desired = newStart; changes.attached = false; }
+        var mhVal = parseFloat(q('j-mh').value) || null, crew = q('j-crew').value, date = q('j-date').value || j.date;
+        var newStart = q('j-start').value ? hm(q('j-start').value) : j.startMin, timeChanged = newStart !== j.startMin || date !== j.date;
+        var sizeChanged = men !== j.men || (mhVal != null && Math.abs(mhVal - (mhNow || 0)) > 0.001);
         var statusChanged = q('j-status').value !== j.status || q('j-notes').value !== (j.notes || '') || (parseFloat(q('j-actual').value) || 0) !== (+j.actual || 0);
         m.close();
         var p = statusChanged ? App.put('jobs/' + j.id, { status: q('j-status').value, notes: q('j-notes').value, actual_hours: q('j-actual').value || 0 }) : Promise.resolve();
-        p.then(function () { return reflow(j, changes); }).then(function () { App.toast('Job updated.'); }).catch(function (x) { App.toast(x.message, 'err'); });
+        p.then(function () {
+          // a later day of a multi-day job: more men or hours re-spreads the whole job from its first day still to do
+          if (proj && sizeChanged && !(timeChanged && isHead(j))) return App.post('jobs/' + j.id + '/reflow', { men: men, totalManHours: mhVal }).then(function (r) { toastFlow(r.flowed) || App.toast('Job updated.'); return load(); });
+          var changes = { men: men, manHours: proj ? j.manHours : (mhVal || j.manHours), crew: crew, date: date };
+          if (timeChanged) { changes.desired = newStart; changes.attached = false; }
+          if (isHead(j) && j.status !== 'Completed' && (timeChanged || sizeChanged || crew !== j.crew)) { changes.flow = true; changes.flowTotal = mhVal || mhNow; }
+          return reflow(j, changes).then(function () { App.toast('Job updated.'); });
+        }).catch(function (x) { App.toast(x.message, 'err'); });
       };
     }
     function routeModal(date) {
@@ -466,9 +504,14 @@
         '<label class="field">Day starts<input id="s-a" type="time" value="' + st.dayStart + '"></label><label class="field">Day ends<input id="s-b" type="time" value="' + st.dayEnd + '"></label>' +
         '<label class="field">Fallback speed (km/h)<input id="s-v" type="number" min="5" step="1" value="' + st.speedKmh + '"></label><label class="field">Fallback road factor<input id="s-f" type="number" min="1" step="0.05" value="' + st.roadFactor + '"></label>' +
         '<label class="field">Park and unload (min per stop)<input id="s-p" type="number" min="0" step="1" value="' + st.bufferMinutes + '"></label></div>' +
+        '<div class="field" style="margin-top:12px">Working days <span class="muted small">— big jobs carry on to the next working day</span></div><div class="chips" id="s-wd">' +
+        [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']].map(function (d) { return '<button type="button" class="chipb' + ((st.workDays || [1, 2, 3, 4, 5]).indexOf(d[0]) >= 0 ? ' on' : '') + '" data-wd="' + d[0] + '">' + d[1] + '</button>'; }).join('') + '</div>' +
         '<div class="actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="ok">Save</button></div>');
+      m.el.querySelector('#s-wd').onclick = function (e) { var b = e.target.closest('[data-wd]'); if (b) b.classList.toggle('on'); };
       m.el.querySelector('#ok').onclick = function () {
-        App.put('schedule/settings', { dayStart: m.el.querySelector('#s-a').value, dayEnd: m.el.querySelector('#s-b').value, speedKmh: m.el.querySelector('#s-v').value, roadFactor: m.el.querySelector('#s-f').value, bufferMinutes: m.el.querySelector('#s-p').value })
+        var wd = Array.prototype.map.call(m.el.querySelectorAll('[data-wd].on'), function (b) { return +b.getAttribute('data-wd'); });
+        if (!wd.length) return App.toast('Pick at least one working day.', 'warn');
+        App.put('schedule/settings', { dayStart: m.el.querySelector('#s-a').value, dayEnd: m.el.querySelector('#s-b').value, speedKmh: m.el.querySelector('#s-v').value, roadFactor: m.el.querySelector('#s-f').value, bufferMinutes: m.el.querySelector('#s-p').value, workDays: wd })
           .then(function (d) { S.settings = d.settings; m.close(); renderCal.scrolled = false; render(); App.toast('Saved. New bookings use these driving times.'); }).catch(function (x) { App.toast(x.message, 'err'); });
       };
     }

@@ -34,10 +34,18 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    set under the ⚙ on the Schedule page), shown as orange drive blocks. Jobs placed straight after another stay attached
    and move with it. Tap a job to add or remove men (its length and the jobs after it update), change man-hours, crew,
    time, status or notes, get directions, or unschedule it. **Route** on a day shows the stops on a map in order.
+   **Big jobs** longer than a working day are booked over several days automatically: day 1 runs to the end of the day,
+   the rest goes onto the crew's next working days (set under ⚙; weekends off by default), fitted around other jobs.
+   Each day shows "Day 2/3". Moving day 1 moves the whole job; moving a later day moves just that day; more men or fewer
+   man-hours re-spread the days still to do; **Add another day** extends it. Unscheduling removes every day still to do.
 
-7. **Close out** each job from its **job page** (Schedule › tap the job, or Overview › To close out): arrival and finish
-   times, men, breaks, then the man-hours each task took (pre-split from the estimate), access, slow-downs, green waste,
-   **before/after photos**, and the **next trim** (3/4/6/12 months). Each close-out adds rows to the man-hours database.
+7. **Close out** each job from its **job page** (Schedule › tap the job, or Overview › To close out) — a full-screen,
+   one-question-at-a-time flow built for the phone: start and finish times, people, breaks, then how long each kind of
+   work took (all the hedging together, then lawns, garden, trees, other, setup), access, slow-downs, green waste,
+   **photos**, notes and the **next trim**. Each close-out adds rows to the man-hours database.
+   On a **multi-day job**, each day except the last gets a short **end-of-day check-in** (times, people, breaks, roughly how
+   much is done, a photo, notes for tomorrow); it warns when the job is running behind and can add a day. The close-out on
+   the last day (or on any day, by answering "Yes — it's all finished") adds up every day and cancels days no longer needed.
 8. **Trims due** on the Overview (within 30 days): **Book same price** (an accepted quote at last time's price, straight
    to the schedule tray), **Re-quote** (saved measurements at today's rates), +1 month, or remove.
    **Reports › Man-hours** compares actual with estimated man-hours by task and hedge height band; after 3 jobs it suggests
@@ -110,5 +118,6 @@ Passwords are salted PBKDF2 hashes and sessions are stored as token hashes; 10 w
 npx wrangler d1 execute seedsmans --local --file schema/existing.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0004_property_location.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0005_site_drawings.sql
+# …and each later migration in order (0006, 0007, 0008)
 npx wrangler dev
 ```

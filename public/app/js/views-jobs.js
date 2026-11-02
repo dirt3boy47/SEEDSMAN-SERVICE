@@ -7,6 +7,7 @@
 
   function hm(h) { h = +h || 0; var m = Math.round(h * 60), hh = Math.floor(m / 60), mm = m % 60; return (hh ? hh + ' h' : '') + (hh && mm ? ' ' : '') + (mm || !hh ? mm + ' min' : ''); }
   function pctDiff(a, e) { if (!e) return ''; var d = Math.round((a - e) / e * 100); return (d > 0 ? '+' : '') + d + '%'; }
+  function mhs(h) { return String(Math.round((+h || 0) * 100) / 100); } // man-hours as a plain number
   function clockStr(t) { if (!t) return ''; var p = t.split(':'), h = +p[0]; return (h % 12 || 12) + ':' + p[1] + (h < 12 ? 'am' : 'pm'); }
 
   // ---------------- photos ----------------
@@ -63,7 +64,8 @@
   }
 
   // ---------------- the close-out: a guided, one-question-at-a-time flow (built for iPhone) ----------------
-  function closeout(d, onDone) { App.me().then(function (me) { runCloseout(d, onDone, me.rates || {}); }).catch(function (x) { App.toast(x.message, 'err'); }); }
+  // mode 'checkin' = end-of-day check-in for one day of a multi-day job (a shorter set of questions)
+  function closeout(d, onDone, mode) { App.me().then(function (me) { runCloseout(d, onDone, me.rates || {}, mode || 'closeout'); }).catch(function (x) { App.toast(x.message, 'err'); }); }
   // Hedging first, then the other kinds of work, then setup — one time question per group
   var GROUPS = [['Hedges', 'Hedging', 'all the hedging'], ['Lawns', 'Lawns', 'the lawns'], ['Gardens', 'Garden work', 'the garden work'], ['Trees', 'Tree & shrub work', 'the tree and shrub work'], ['Other', 'Other work', 'the other work']];
   function groupTasks(tasks, rates) {
@@ -77,8 +79,14 @@
     tasks.filter(function (t) { return t.category === 'setup'; }).forEach(function (t) { out.push({ key: 'g:setup', cat: 'setup', name: 'Setup & clean-up', phrase: 'setting up, cleaning up and loading', members: [t], est: t.est || 0, setup: true }); });
     return out;
   }
-  function runCloseout(d, onDone, rates) {
-    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice(), SAVE = 'seedsman-closeout2-' + j.id;
+  function runCloseout(d, onDone, rates, mode) {
+    var CHECKIN = mode === 'checkin';
+    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice(), SAVE = (CHECKIN ? 'seedsman-checkin-' : 'seedsman-closeout2-') + j.id;
+    // a multi-day job: the days already checked in count towards the totals in the final close-out
+    var multi = j.parts > 1, earlier = (d.days || []).filter(function (x) { return x.id !== j.id && x.day_log; });
+    var prevWork = 0, prevManMin = 0;
+    earlier.forEach(function (x) { var l = x.day_log, m = l.men || 1; prevWork += (l.workingMH || 0) / m * 60; prevManMin += (l.workingMH || 0) * 60; });
+    if (CHECKIN) { prevWork = 0; prevManMin = 0; }
     var groups = groupTasks(plan.tasks, rates), groupOf = {};
     groups.forEach(function (g) { g.members.forEach(function (t) { groupOf[t.key] = g; }); });
     var conds = rates.conditions || [], names = { maintained: 'Well kept — a regular trim', overgrown: 'Overgrown — hadn’t been cut for a while', reduction: 'Very overgrown — a hard cut back' };
@@ -90,12 +98,12 @@
 
     // answers
     var A = { arrived: j.start.slice(11, 16), arrivedOk: false, finished: j.end.slice(11, 16), finishedOk: false, men: null, breaks: null,
-      task: {}, cond: {}, extra: null, access: null, slow: [], waste: null, picker: null, photoSkip: false, notes: null, months: null, date: j.start.slice(0, 10) };
+      task: {}, cond: {}, extra: null, access: null, slow: [], waste: null, picker: null, photoSkip: false, notes: null, months: null, date: j.start.slice(0, 10), allDone: null, progress: null };
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch (e) { /* ignore */ }
     var resumeAt = 0;
     if (saved && saved.A) { A = Object.assign(A, saved.A); resumeAt = saved.i || 0; }
-    else if (d.closeout) { // editing a job that is already closed out: fill in what was recorded, start on the check screen
+    else if (d.closeout && !CHECKIN) { // editing a job that is already closed out: fill in what was recorded, start on the check screen
       var c = d.closeout, cm = c.men || 2;
       Object.assign(A, { arrived: c.arrived, arrivedOk: true, finished: c.finished, finishedOk: true, men: cm, breaks: c.break_minutes || 0, access: c.access || 'Normal',
         slow: (c.details && c.details.issues && c.details.issues.length) ? c.details.issues : ['Nothing slowed us down'], waste: c.waste_m3 != null ? c.waste_m3 : 0,
@@ -111,28 +119,41 @@
     function save(i) { try { localStorage.setItem(SAVE, JSON.stringify({ A: A, i: i })); } catch (e) { /* ignore */ } }
 
     function onsite() { var m = toMin(A.finished) - toMin(A.arrived); return m < 0 ? m + 1440 : m; }
-    function working() { return Math.max(0, onsite() - (A.breaks || 0)); } // team minutes
+    function today() { return Math.max(0, onsite() - (A.breaks || 0)); } // today's working time, team minutes
+    function working() { return today() + prevWork; } // all days
     function used(exceptKey) { var s = 0; Object.keys(A.task).forEach(function (k) { if (k !== exceptKey) s += A.task[k] || 0; }); if (A.extra && A.extra.min && exceptKey !== '__extra') s += A.extra.min; return s; }
     var men = function () { return A.men || j.men || plan.crew || 2; };
-    var estTeam = function (t) { return (t.est || 0) * 60 / men(); }; // estimate in team minutes
+    // average crew over all the days, so task times answered "for the whole team" convert to man-hours correctly
+    var avgMen = function () { var w = working(); return w ? (prevManMin + today() * men()) / w : men(); };
+    var estTeam = function (t) { return (t.est || 0) * 60 / avgMen(); }; // estimate in team minutes
 
     // ---- the questions ----
-    var Q = [];
-    Q.push({ label: 'Start time', id: 'arrived', title: 'Did you start at ' + clock(j.start.slice(11, 16)) + '?', sub: 'The time the crew arrived on site.', kind: 'confirmTime', key: 'arrived', ok: 'arrivedOk' });
+    var Q = [], dayWord = multi ? 'Day ' + j.part + ' of ' + j.parts : '';
+    if (CHECKIN) Q.push({ label: 'Finished?', id: 'allDone', kind: 'choice', key: 'allDone', title: 'Is the whole job finished today?', sub: dayWord + ' of this job is booked. If you got it all done, we’ll go straight to closing it out.',
+      options: [[false, 'No — we’re coming back'], [true, 'Yes — it’s all finished']] });
+    Q.push({ label: 'Start time', id: 'arrived', title: (multi ? 'Today, did you start at ' : 'Did you start at ') + clock(j.start.slice(11, 16)) + '?', sub: (multi && !CHECKIN ? (j.part === j.parts ? dayWord + ' — the last day. ' : 'Day ' + j.part + ' — finishing the job today. ') + (earlier.length ? 'The ' + earlier.length + ' earlier day' + (earlier.length === 1 ? ' is' : 's are') + ' already logged. ' : '') : '') + 'The time the crew arrived on site.', kind: 'confirmTime', key: 'arrived', ok: 'arrivedOk' });
     Q.push({ label: 'Finish time', id: 'finished', title: 'Did you finish at ' + clock(j.end.slice(11, 16)) + '?', sub: 'The time you packed up and left.', kind: 'confirmTime', key: 'finished', ok: 'finishedOk',
       check: function () { return onsite() > 0 && onsite() <= 16 * 60 ? '' : 'The finish time needs to be after the start time.'; } });
-    Q.push({ label: 'People', id: 'men', title: 'How many people worked on this job?', sub: 'Count everyone, including you.', kind: 'number', key: 'men' });
+    Q.push({ label: 'People', id: 'men', title: multi ? 'How many people worked today?' : 'How many people worked on this job?', sub: 'Count everyone, including you.', kind: 'number', key: 'men' });
     Q.push({ label: 'Breaks', id: 'breaks', title: 'How long were your breaks, all up?', sub: 'Smoko and lunch together. If everyone stopped at the same time, count it once.', kind: 'choice', key: 'breaks',
       options: [[0, 'No breaks'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [90, '1½ hours']] });
-    groups.forEach(function (g, gi) {
+    if (CHECKIN) {
+      Q.push({ label: 'Progress', id: 'progress', kind: 'choice', key: 'progress', title: 'How much of the whole job is done now?', sub: 'Counting earlier days too. A rough guess is fine — it tells us if more days are needed.',
+        options: [[25, 'About a quarter'], [33, 'About a third'], [50, 'About half'], [66, 'About two thirds'], [75, 'About three quarters'], [90, 'Nearly all of it']] });
+      Q.push({ label: 'Photos', id: 'photos', kind: 'photos', title: 'Take a progress photo', sub: 'Optional — one shot of where you got to today.' });
+      Q.push({ label: 'Notes', id: 'notes', kind: 'notes', title: 'Anything for the next day?', sub: 'Tap to add, or type your own.', quick: ['Gear left on site', 'Start at the back', 'Gate code needed', 'Customer away tomorrow', 'Waste still to take', 'Need more men'] });
+      Q.push({ id: 'summary', kind: 'summary', title: 'Check and save the day' });
+    }
+    if (!CHECKIN) groups.forEach(function (g, gi) {
       var many = g.members.length > 1, units = g.members.map(function (t) { return t.unit; }).filter(Boolean), oneUnit = units.length === g.members.length && units.every(function (u) { return u === units[0]; });
       var qty = oneUnit ? App.qty(g.members.reduce(function (a, t) { return a + (+t.qty || 0); }, 0), units[0]) : '';
       Q.push({ id: 'task:' + g.key, label: g.name, kind: 'duration', task: g, last: gi === groups.length - 1,
         title: 'How long did ' + (g.setup ? g.phrase : many ? g.phrase : 'the ' + g.members[0].name.toLowerCase()) + ' take?',
-        sub: (many ? g.members.map(function (t) { return t.name; }).join(', ') + (qty ? ' (' + qty + ' all up)' : '') + '. ' : qty && !g.setup ? qty + ' · ' : '') + 'We guessed about ' + dur(q15(estTeam(g))) + '. Answer for the whole team working together.' });
+        sub: (multi ? 'Over all ' + j.part + ' days. ' : '') + (many ? g.members.map(function (t) { return t.name; }).join(', ') + (qty ? ' (' + qty + ' all up)' : '') + '. ' : qty && !g.setup ? qty + ' · ' : '') + 'We guessed about ' + dur(q15(estTeam(g))) + '. Answer for the whole team working together.' });
       if (g.hedge) Q.push({ id: 'cond:' + g.key, label: (many ? 'Hedges' : g.members[0].name) + ' — condition', kind: 'condition', task: g,
         title: many ? 'What were the hedges like?' : 'What was the ' + g.members[0].name.toLowerCase() + ' like?', sub: many ? 'Pick the closest for most of them. This helps us price it right next time.' : 'This helps us price it right next time.' });
     });
+    if (!CHECKIN) {
     Q.push({ label: 'Extra work', id: 'extra', kind: 'extra', title: 'Did you do any other work that wasn’t on the quote?', sub: 'For example extra pruning or weeding the customer asked for.' });
     Q.push({ label: 'Access', id: 'access', kind: 'choice', key: 'access', title: 'How easy was it to get to?', sub: 'Getting gear in and working around the hedge.', options: [['Easy', 'Easy'], ['Normal', 'Normal'], ['Difficult', 'Hard']] });
     Q.push({ label: 'Slowed down by', id: 'slow', kind: 'multi', key: 'slow', title: 'Did anything slow you down?', sub: 'Tap all that apply.', options: ['More overgrown than expected', 'Steep or uneven ground', 'Tight access', 'Wet weather', 'Hot weather', 'Equipment trouble', 'Customer asked for extras', 'More waste than expected'], none: 'Nothing slowed us down' });
@@ -144,6 +165,7 @@
     Q.push({ label: 'Next trim', id: 'months', kind: 'choice', key: 'months', title: 'When should we come back for the next trim?', sub: 'We’ll remind you when it’s due.',
       options: [[3, 'In 3 months'], [4, 'In 4 months'], [6, 'In 6 months'], [12, 'In 12 months'], [0, d.closeout ? 'Leave the reminder as it is' : 'Don’t remind me']] });
     Q.push({ id: 'summary', kind: 'summary', title: 'Check and finish' });
+    }
 
     function done(q) {
       if (q.kind === 'confirmTime') return A[q.ok] === true && (!q.check || !q.check());
@@ -170,6 +192,8 @@
       if (q.kind === 'photos') return photos.length ? photos.length + ' photo' + (photos.length === 1 ? '' : 's') : 'Skipped';
       if (q.kind === 'notes') return A.notes || 'None';
       if (q.id === 'months') return A.months ? 'In ' + A.months + ' months' : d.closeout ? 'Leave as it is' : 'No reminder';
+      if (q.id === 'allDone') return A.allDone ? 'Yes' : 'No — coming back';
+      if (q.id === 'progress') return (q.options.filter(function (o) { return o[0] === A.progress; })[0] || [0, ''])[1];
       return '';
     }
 
@@ -205,7 +229,7 @@
         h += '<div class="cx-grid">' + [1, 2, 3, 4, 5, 6, 7, 8].map(function (n) { return big(n, String(n), A.men === n, 'num'); }).join('') + '</div>';
       } else if (q.kind === 'choice') {
         h += '<div class="cx-opts">' + q.options.map(function (o) { return big(o[0], esc(o[1]), A[q.key] === o[0]); }).join('') + '</div>';
-        if (q.id === 'breaks' && A.breaks != null) h += '<p class="cx-note">Working time: <b>' + dur(working()) + '</b> (' + dur(onsite()) + ' on site, less breaks)</p>';
+        if (q.id === 'breaks' && A.breaks != null) h += '<p class="cx-note">Working time ' + (multi ? 'today' : '') + ': <b>' + dur(today()) + '</b> (' + dur(onsite()) + ' on site, less breaks)' + (prevWork ? '. With the earlier days: <b>' + dur(working()) + '</b>' : '') + '</p>';
         if (q.id === 'months' && A.months) { var dd = new Date(A.date + 'T00:00:00'); dd.setMonth(dd.getMonth() + A.months); h += '<p class="cx-note">We’ll remind you around <b>' + dd.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>.</p>'; }
       } else if (q.kind === 'duration') {
         var e = estTeam(q.task), left = working() - used(q.task.key), cur = A.task[q.task.key];
@@ -233,8 +257,8 @@
           '<textarea class="cx-text" data-notes placeholder="Type a note (optional)">' + esc(A.notes || '') + '</textarea>' +
           '<button class="cx-skip" data-nonotes>' + (A.notes === '' ? '✓ No notes' : 'No notes') + '</button>';
       } else if (q.kind === 'summary') {
-        var tasksTotal = used(null), gap = working() - tasksTotal;
-        h += '<div class="cx-sumhead"><div><small>Working time</small><b>' + Math.floor(working() / 60) + 'h' + (working() % 60 ? ' ' + working() % 60 + 'm' : '') + '</b></div><div><small>People</small><b>' + men() + '</b></div><div><small>Man-hours</small><b>' + (Math.round(working() / 60 * men() * 4) / 4) + '</b></div></div>' +
+        var tasksTotal = used(null), gap = CHECKIN ? 0 : working() - tasksTotal, wk = Math.round(working()), totMH = Math.round((prevManMin + today() * men()) / 60 * 4) / 4;
+        h += '<div class="cx-sumhead"><div><small>' + (CHECKIN ? 'Worked today' : multi ? 'Working time, ' + j.part + ' days' : 'Working time') + '</small><b>' + Math.floor(wk / 60) + 'h' + (wk % 60 ? ' ' + wk % 60 + 'm' : '') + '</b></div><div><small>People' + (multi ? ' today' : '') + '</small><b>' + men() + '</b></div><div><small>Man-hours</small><b>' + totMH + '</b></div></div>' +
           (gap > 0 ? '<p class="cx-note">' + dur(gap) + ' isn’t linked to a task — we’ll record it as “other time”. Tap Change on a task if you want to add it there.</p>' : gap < 0 ? '<p class="cx-warn">Your task times add up to <b>' + dur(-gap) + '</b> more than the time you worked. Pick one to fix it:</p><div class="cx-opts" style="margin-top:10px">' +
             big('fix:shrink', 'Shrink the task times to fit', false) + big('fix:finish', 'We finished later — make it ' + clock(addMin(A.finished, -gap)), false) + '</div>' : '') +
           '<div class="cx-list">' + Q.slice(0, -1).map(function (qq, qi) { return '<div class="cx-li"><div><small>' + esc(qq.label || qq.title) + '</small><b>' + esc(answerText(qq)) + '</b></div><button data-jump="' + qi + '">Change</button></div>'; }).join('') + '</div>';
@@ -242,7 +266,7 @@
       body.innerHTML = '<div class="cx-in">' + h + '</div>';
       body.scrollTop = 0;
       var next = el.querySelector('.cx-next');
-      next.textContent = q.kind === 'summary' ? 'Finish job' : 'Next';
+      next.textContent = q.kind === 'summary' ? (CHECKIN ? 'Save the day' : 'Finish job') : 'Next';
       next.disabled = !done(q) || (q.kind === 'summary' && working() - used(null) < -1);
       next.classList.toggle('go', q.kind === 'summary');
     }
@@ -273,6 +297,7 @@
         return;
       }
       if (q.kind === 'number') { A.men = +v; save(i); show(); advanceSoon(); return; }
+      if (q.id === 'allDone' && v === 'true') { try { localStorage.removeItem(SAVE); } catch (x) { /* ignore */ } close(); runCloseout(d, onDone, rates, 'closeout'); return; }
       if (q.kind === 'choice') { var o = q.options.filter(function (x) { return String(x[0]) === v; })[0]; A[q.key] = o[0]; save(i); show(); advanceSoon(); return; }
       if (q.kind === 'duration') { A.task[q.task.key] = +v; save(i); show(); advanceSoon(); return; }
       if (q.kind === 'condition') { A.cond[q.task.key] = v; save(i); show(); advanceSoon(); return; }
@@ -304,9 +329,32 @@
         .catch(function (x) { if (box) box.innerHTML = '<p class="cx-warn">' + esc(x.message) + ' — check your signal and try again.</p>'; });
     });
 
-    function finish() {
+    function finishDay() {
       var next = el.querySelector('.cx-next'); next.disabled = true; next.textContent = 'Saving…';
-      var m = men(), toMH = function (min) { return Math.round(min / 60 * m * 100) / 100; };
+      App.post('jobs/' + j.id + '/checkin', { arrived: A.arrived, finished: A.finished, men: men(), breakMinutes: A.breaks || 0, progress: A.progress, notes: A.notes || '' }).then(function (r) {
+        try { localStorage.removeItem(SAVE); } catch (e) { /* ignore */ }
+        var behind = r.needMH > r.bookedMH * 1.15 + 1, ahead = r.bookedMH > r.needMH * 1.5 + 4;
+        body.innerHTML = '<div class="cx-in cx-done"><div class="cx-big-tick">' + icon('check') + '</div><h1 class="cx-q">Day ' + j.part + ' saved</h1>' +
+          '<p class="cx-sub">' + esc(j.customer) + ' · ' + r.doneMH + ' man-hours done so far · about ' + r.log.progress + '% of the job.</p>' +
+          '<div class="progress"><i style="width:' + r.log.progress + '%"></i></div>' +
+          (behind ? '<p class="cx-warn">At this rate the rest needs about <b>' + Math.round(r.needMH * 4) / 4 + ' man-hours</b>, but only <b>' + r.bookedMH + '</b> are booked.</p><button class="cx-opt accent" id="cx-addday" style="width:100%;margin-top:10px">Add another day</button>'
+            : ahead ? '<p class="cx-note">You’re ahead — the rest looks like about ' + Math.round(r.needMH * 4) / 4 + ' man-hours, and ' + r.bookedMH + ' are booked. You can shorten the job from the schedule.</p>'
+            : '<p class="cx-note">On track — ' + r.bookedMH + ' man-hours are booked for the rest.</p>') +
+          (r.next ? '<p class="cx-sub" style="margin-top:14px">Next: <b>' + new Date(r.next.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' }) + ', ' + clock(r.next.start.slice(11, 16)) + '</b></p>' : '<p class="cx-warn">No more days are booked for this job.</p><button class="cx-opt accent" id="cx-addday" style="width:100%;margin-top:10px">Add another day</button>') + '</div>';
+        var add = body.querySelector('#cx-addday');
+        if (add) add.onclick = function () {
+          add.disabled = true; add.textContent = 'Adding…';
+          App.post('jobs/' + j.id + '/addday', {}).then(function (x) { var dd = x.flowed.days; add.outerHTML = '<p class="cx-note">Added — the job now runs to <b>' + new Date(dd[dd.length - 1].slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' }) + '</b>.</p>'; })
+            .catch(function (x) { add.disabled = false; add.textContent = 'Add another day'; App.toast(x.message, 'err', 6000); });
+        };
+        el.querySelector('.cx-back').style.visibility = 'hidden'; el.querySelector('.cx-bar i').style.width = '100%'; el.querySelector('.cx-count').textContent = 'Saved';
+        next.disabled = false; next.textContent = 'Done'; next.onclick = function () { close(); if (onDone) onDone(); };
+      }).catch(function (x) { next.disabled = false; next.textContent = 'Try again'; App.toast(x.message + ' — your answers are saved.', 'err', 7000); });
+    }
+    function finish() {
+      if (CHECKIN) return finishDay();
+      var next = el.querySelector('.cx-next'); next.disabled = true; next.textContent = 'Saving…';
+      var m = avgMen(), toMH = function (min) { return Math.round(min / 60 * m * 100) / 100; };
       var tasks = [];
       groups.forEach(function (g) {
         var min = A.task[g.key] || 0, est = g.members.reduce(function (a, t) { return a + (t.est || 0); }, 0), qty = g.members.reduce(function (a, t) { return a + (+t.qty || 0); }, 0);
@@ -314,7 +362,7 @@
       });
       if (A.extra && A.extra.min) tasks.push({ key: 'extra:work', name: A.extra.name || 'Other work', actual: toMH(A.extra.min) });
       var gap = working() - used(null); if (gap >= 15) tasks.push({ key: 'extra:other', name: 'Other time (not linked to a task)', actual: toMH(gap) });
-      App.post('jobs/' + j.id + '/closeout', { date: A.date, arrived: A.arrived, finished: A.finished, men: m, breakMinutes: A.breaks || 0, tasks: tasks,
+      App.post('jobs/' + j.id + '/closeout', { date: A.date, arrived: A.arrived, finished: A.finished, men: men(), breakMinutes: A.breaks || 0, tasks: tasks,
         access: A.access, issues: A.slow.filter(function (x) { return x !== 'Nothing slowed us down'; }), wasteM3: A.waste, pickerUsed: A.picker, notes: A.notes || '', nextTrimMonths: A.months || 0 })
         .then(function (r) {
           try { localStorage.removeItem(SAVE); } catch (e) { /* ignore */ }
@@ -338,28 +386,49 @@
       App.get('jobs/' + encodeURIComponent(id)).then(function (d) {
         if (!ctx.el.isConnected) return;
         var j = d.job, c = d.closeout, done = j.status === 'Completed';
-        App.setTop({ el: ctx.el, back: '#/schedule?date=' + j.start.slice(0, 10), titleHtml: esc(j.customer) + ' ' + App.pill(j.status), sub: [j.address, j.suburb].filter(Boolean).join(', ') + ' · ' + App.date(j.start) + ' ' + App.time(j.start),
+        // multi-day: which action fits this day
+        var days = d.days || [], multi = j.parts > 1, last = !multi || j.part === j.parts;
+        var behind = days.filter(function (x) { return x.part < j.part && x.status !== 'Completed'; })[0];
+        var act = c ? { label: 'Edit close-out', run: 'closeout' } : behind ? { label: 'Check in day ' + behind.part + ' first', go: behind.id }
+          : !last ? { label: done ? 'Redo day ' + j.part + ' check-in' : 'End of day check-in', fab: 'Check in for today', run: 'checkin', open: !done }
+          : { label: 'Close out job', fab: 'Close out this job', run: 'closeout', open: true };
+        App.setTop({ el: ctx.el, back: '#/schedule?date=' + j.start.slice(0, 10), titleHtml: esc(j.customer) + ' ' + (multi ? '<span class="tag info">Day ' + j.part + ' of ' + j.parts + '</span> ' : '') + App.pill(j.status), sub: [j.address, j.suburb].filter(Boolean).join(', ') + ' · ' + App.date(j.start) + ' ' + App.time(j.start),
           actions: '<a class="btn" href="#/quotes/' + esc(j.quote_id) + '">' + icon('quote') + '<span class="lbl">' + esc(j.quote_number) + '</span></a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + '<span class="lbl">Directions</span></a>' +
-            '<button class="btn primary" id="close-out">' + icon('check') + '<span class="lbl">' + (done ? 'Edit close-out' : 'Close out job') + '</span></button>' });
-        document.getElementById('close-out').onclick = function () { closeout(d, load); };
+            '<button class="btn primary" id="close-out">' + icon('check') + '<span class="lbl">' + esc(act.label) + '</span></button>' });
+        function doAct() { if (act.go) location.hash = '#/jobs/' + act.go; else closeout(d, load, act.run); }
+        document.getElementById('close-out').onclick = doAct;
         var plan = d.plan || { tasks: [], estimate: 0 }, tasks = d.tasks || [];
         var results = c ? '<div class="co-review"><div><small>Working man-hours</small><b>' + hm(c.working_man_hours) + '</b></div><div><small>Estimated</small><b>' + hm(c.estimated_man_hours) + '</b></div><div><small>Difference</small><b class="' + (c.working_man_hours > c.estimated_man_hours * 1.1 ? 'over' : c.working_man_hours < c.estimated_man_hours * 0.9 ? 'under' : '') + '">' + pctDiff(c.working_man_hours, c.estimated_man_hours) + '</b></div><div><small>On site</small><b>' + clockStr(c.arrived) + '–' + clockStr(c.finished) + '</b><small>' + c.men + ' men · ' + c.break_minutes + ' min breaks</small></div></div>' +
           '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Task</th><th class="r">Qty</th><th class="r">Estimate</th><th class="r">Actual</th><th class="r">±</th><th class="r">Rate achieved</th></tr></thead><tbody>' + tasks.map(function (t) {
             var rate = t.qty && t.actual_man_hours ? (t.qty / t.actual_man_hours).toFixed(1) + ' ' + (t.unit || '') + '/h' : '';
             return '<tr><td><b>' + esc(t.name) + '</b>' + (t.tier ? '<small>' + esc(t.tier) + (t.condition ? ' · ' + esc(t.condition) : '') + '</small>' : '') + '</td><td class="r">' + (t.qty != null ? App.qty(t.qty, t.unit) : '') + '</td><td class="r">' + (t.est_man_hours ? hm(t.est_man_hours) : '—') + '</td><td class="r">' + hm(t.actual_man_hours) + '</td><td class="r">' + pctDiff(t.actual_man_hours, t.est_man_hours) + '</td><td class="r">' + rate + '</td></tr>';
           }).join('') + '</tbody></table></div>' + (c.notes ? '<p><b>Notes:</b> ' + esc(c.notes) + '</p>' : '') + ((c.details && c.details.issues && c.details.issues.length) ? '<p class="muted small">Slowed by: ' + esc(c.details.issues.join(', ')) + ' · access ' + esc(c.access || '') + '</p>' : '')
+          : !last ? '<div class="empty" style="padding:20px">' + icon('clock') + '<b>' + (j.day_log ? 'Day ' + j.part + ' is checked in' : 'Day ' + j.part + ' of ' + j.parts) + '</b>' + (j.day_log ? 'The full close-out happens on the last day and adds up every day.' : 'At the end of the day, tap <b>End of day check-in</b> — four quick questions. The full close-out happens on the last day.') + '</div>'
           : '<div class="empty" style="padding:20px">' + icon('clock') + '<b>Not closed out yet</b>When the job’s done, tap <b>Close out job</b> — a few quick questions record how long each task really took, so future quotes get sharper.</div>';
+        // the days of a multi-day job, with a progress bar
+        var daysCard = '';
+        if (multi) {
+          var logged = days.reduce(function (a, x) { return a + (x.day_log ? x.day_log.workingMH || 0 : 0); }, 0), booked = days.reduce(function (a, x) { return a + (x.status !== 'Completed' ? +x.man_hours || 0 : 0); }, 0);
+          var lastLog = days.filter(function (x) { return x.day_log; }).pop(), pct = c ? 100 : lastLog ? lastLog.day_log.progress : 0;
+          daysCard = '<div class="card"><div class="card-h"><h2>Days</h2><span class="muted small">' + (c ? 'Finished' : pct ? 'About ' + pct + '% done' : 'Not started') + '</span></div><div class="card-b">' +
+            '<div class="progress"><i style="width:' + pct + '%"></i></div><p class="muted small" style="margin:0 0 10px">' + mhs(logged) + ' man-hours done' + (booked ? ' · ' + mhs(booked) + ' booked for the days to go' : '') + ' · quoted ' + mhs(plan.estimate) + '</p><div class="days">' +
+            days.map(function (x) {
+              var l = x.day_log, dd = new Date(x.start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+              return '<a class="dayrow' + (x.status === 'Completed' ? ' done' : '') + (x.id === j.id ? ' cur' : '') + '" href="#/jobs/' + esc(x.id) + '"><span class="dn">' + (x.status === 'Completed' ? icon('check') : x.part) + '</span><span class="grow"><b>Day ' + x.part + ' · ' + dd + '</b><small>' +
+                (l ? 'Checked in · ' + mhs(l.workingMH) + ' man-h · about ' + l.progress + '% done' + (l.notes ? ' · ' + esc(l.notes) : '') : x.status === 'Completed' ? 'Closed out' : clockStr(x.start.slice(11, 16)) + '–' + clockStr(x.end.slice(11, 16)) + ' · ' + mhs(x.man_hours) + ' man-h booked · ' + x.men + ' men') + '</small></span></a>';
+            }).join('') + '</div></div></div>';
+        }
         ctx.el.innerHTML = '<div class="page"><div class="cols"><div class="stack">' +
-          '<div class="card"><div class="card-h"><h2>Estimate vs actual</h2>' + (c ? '<span class="muted small">' + App.date(c.work_date) + '</span>' : '') + '</div><div class="card-b">' + results + '</div></div>' +
+          daysCard + '<div class="card"><div class="card-h"><h2>Estimate vs actual</h2>' + (c ? '<span class="muted small">' + App.date(c.work_date) + '</span>' : '') + '</div><div class="card-b">' + results + '</div></div>' +
           '<div class="card"><div class="card-h"><h2>Photos</h2><span class="muted small">' + d.photos.length + '</span></div><div class="card-b" id="photos">' + photosHtml(d.photos) + '</div></div>' +
           '</div><div class="stack">' +
           '<div class="card"><div class="card-h"><h2>Job</h2></div><div class="card-b stack"><div><h3>When</h3><div>' + App.date(j.start) + ' · ' + App.time(j.start) + '–' + App.time(j.end) + '</div></div><div><h3>Crew</h3><div>' + esc(j.crew) + ' · ' + (j.men || j.crew_size) + ' men</div></div>' +
             '<div><h3>Work</h3><div>' + esc((j.services || 'Hedge trimming').replace(/,/g, ', ')) + '</div><small class="muted">Estimated ' + hm(plan.estimate) + ' man-hours · ' + money(j.total) + ' incl. GST</small></div>' + (j.notes ? '<div><h3>Notes</h3><div style="white-space:pre-wrap">' + esc(j.notes) + '</div></div>' : '') + '</div></div>' +
           '<div class="card"><div class="card-h"><h2>Next trim</h2></div><div class="card-b">' + (d.trim && d.trim.active ? '<div><b>' + App.date(d.trim.due) + '</b> <span class="muted small">every ' + d.trim.interval_months + ' months · ' + esc(d.trim.status) + '</span></div><div class="row" style="margin-top:8px"><button class="btn sm" data-trim="move">Change date</button><button class="btn sm ghost" data-trim="skip" style="color:var(--danger)">No reminder</button></div>'
             : '<p class="muted small" style="margin:0">' + (done ? 'No reminder set.' : 'Set when you close out the job.') + '</p>') + '</div></div>' +
-          '</div></div></div>' + (done ? '' : '<button class="job-fab" id="close-out-fab">' + icon('check') + 'Close out this job</button>');
+          '</div></div></div>' + (act.open || act.go ? '<button class="job-fab" id="close-out-fab">' + icon('check') + esc(act.fab || act.label) + '</button>' : '');
         ctx.el.querySelector('.page').classList.add('job-page');
-        var fab = ctx.el.querySelector('#close-out-fab'); if (fab) fab.onclick = function () { closeout(d, load); };
+        var fab = ctx.el.querySelector('#close-out-fab'); if (fab) fab.onclick = doAct;
         var ph = ctx.el.querySelector('#photos');
         wirePhotos(ph, j.id, d.photos, function () { ph.innerHTML = photosHtml(d.photos); });
         ctx.el.querySelectorAll('[data-trim]').forEach(function (b) {

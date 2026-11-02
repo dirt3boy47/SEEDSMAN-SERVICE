@@ -143,6 +143,8 @@ async function api(request, env, url) {
     case 'jobs':
       if (parts[1] && parts[2] === 'photos') return photosApi(request, env, me, m, parts, url);
       if (parts[1] && parts[2] === 'closeout' && m === 'POST') return closeoutJob(env, me, parts[1], body);
+      if (parts[1] && parts[2] === 'checkin' && m === 'POST') return checkinJob(env, me, parts[1], body);
+      if (parts[1] && (parts[2] === 'reflow' || parts[2] === 'addday') && m === 'POST') return reflowJob(env, me, parts[1], parts[2], body);
       if (parts[1] && !parts[2] && m === 'GET') return jobDetail(env, parts[1], url);
       return jobsApi(env, me, m, parts, url, body);
     case 'photos': if (parts[1] && m === 'DELETE') return photoDelete(env, me, parts[1]); break;
@@ -227,12 +229,14 @@ async function usersApi(env, me, m, body) {
 // ---------------- dashboard and reports ----------------
 const QUOTE_LIST = "SELECT q.id, q.number, q.status, q.revision, q.created_at, q.updated_at, q.valid_until, q.customer_id, q.property_id, " +
   "json_extract(q.calculation, '$.total') AS total, json_extract(q.calculation, '$.exGst') AS ex_gst, json_extract(q.calculation, '$.margin') AS margin, " +
-  "c.name AS customer, p.address, p.suburb, (SELECT j.id FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled') AS job_id, " +
+  "c.name AS customer, p.address, p.suburb, (SELECT j.id FROM jobs j WHERE j.quote_id = q.id AND j.status != 'Cancelled' ORDER BY j.part LIMIT 1) AS job_id, " +
   "coalesce((SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l), 'Hedge trimming') AS services " +
   "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id";
 const JOB_LIST = "SELECT j.*, c.name AS customer, c.phone, p.address, p.suburb, p.lat, p.lng, q.number AS quote_number, json_extract(q.calculation, '$.total') AS total, " +
   "coalesce(j.man_hours, json_extract(q.calculation, '$.personHours')) AS work_hours, coalesce(j.men, json_extract(q.calculation, '$.crew'), 2) AS crew_size, " +
-  "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS services " +
+  "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS services, " +
+  "(SELECT x.id FROM jobs x WHERE x.project_id = j.project_id AND x.status IN ('Scheduled','In progress') ORDER BY x.part LIMIT 1) AS project_head, " +
+  "(SELECT sum(x.man_hours) FROM jobs x WHERE x.project_id = j.project_id AND x.status IN ('Scheduled','In progress')) AS project_open_hours " +
   "FROM jobs j JOIN customers c ON c.id = j.customer_id JOIN properties p ON p.id = j.property_id JOIN quotes q ON q.id = j.quote_id";
 
 async function dashboard(env) {
@@ -445,7 +449,7 @@ async function nextNumber(env) {
 async function quoteOut(env, q) {
   const c = await env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(q.customer_id).first();
   const p = await env.DB.prepare('SELECT * FROM properties WHERE id = ?').bind(q.property_id).first();
-  const job = await env.DB.prepare("SELECT * FROM jobs WHERE quote_id = ? AND status != 'Cancelled'").bind(q.id).first();
+  const job = await env.DB.prepare("SELECT * FROM jobs WHERE quote_id = ? AND status != 'Cancelled' ORDER BY part LIMIT 1").bind(q.id).first();
   const items = parseJson(q.hedges, []).map((x) => Object.assign(Pricing.normaliseItem(x), { measure: x.measure || null }));
   const acceptance = await env.DB.prepare('SELECT name, accepted_at, revision FROM quote_acceptances WHERE quote_id = ?').bind(q.id).first();
   return { quote: Object.assign({}, q, { items, hedges: undefined, calculation: parseJson(q.calculation, {}) }), customer: c, property: p, job, acceptance, drawings: p ? await drawingsOf(env, p.id) : [] };
@@ -598,12 +602,16 @@ async function jobsApi(env, me, m, parts, url, body) {
     await audit(env, me, 'job', jid, 'update', body);
     return json({ job: await env.DB.prepare(JOB_LIST + ' WHERE j.id = ?').bind(jid).first() });
   }
-  if (m === 'DELETE') { await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(jid).run(); return json({ ok: true }); }
+  if (m === 'DELETE') { // a multi-day job is unscheduled as a whole (days already checked in stay)
+    if (j.project_id) await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND status IN ('Scheduled','In progress')").bind(j.project_id).run();
+    else await env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(jid).run();
+    return json({ ok: true });
+  }
   fail(404, 'Not found.');
 }
 
 // ---------------- schedule (drag-and-drop planner) ----------------
-const SCHEDULE_DEFAULTS = { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5 };
+const SCHEDULE_DEFAULTS = { dayStart: '07:00', dayEnd: '17:00', speedKmh: 40, roadFactor: 1.35, bufferMinutes: 5, workDays: [1, 2, 3, 4, 5] };
 async function scheduleApi(env, me, m, parts, url, body) {
   if (!parts[1] && m === 'GET') {
     const from = str(url.searchParams.get('from'), 16), to = str(url.searchParams.get('to'), 16);
@@ -623,6 +631,7 @@ async function scheduleApi(env, me, m, parts, url, body) {
     if (/^\d{2}:\d{2}$/.test(body.dayStart || '')) cur.dayStart = body.dayStart;
     if (/^\d{2}:\d{2}$/.test(body.dayEnd || '')) cur.dayEnd = body.dayEnd;
     ['speedKmh', 'roadFactor', 'bufferMinutes'].forEach((k) => { const v = numOrNull(body[k]); if (v != null && v >= 0 && v < 1000) cur[k] = v; });
+    if (Array.isArray(body.workDays)) { const wd = [...new Set(body.workDays.map((x) => parseInt(x, 10)).filter((x) => x >= 0 && x <= 6))].sort(); if (wd.length) cur.workDays = wd; }
     b.schedule = cur;
     await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('business', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(b)).run();
     return json({ settings: cur });
@@ -637,9 +646,10 @@ async function scheduleApi(env, me, m, parts, url, body) {
 async function applySchedule(env, me, body) {
   const list = (Array.isArray(body.jobs) ? body.jobs : []).slice(0, 200);
   if (!list.length) fail(400, 'Nothing to schedule.');
-  const park = [], place = [], created = [];
+  const park = [], place = [], created = [], flows = [], flowed = [];
   const seenQuotes = {};
   for (const x of list) {
+    if (x.flow) { flows.push(x); continue; } // laid out over as many days as it needs, after the rest are known
     const start = str(x.start, 16), end = str(x.end, 16);
     if (!LOCAL_DT.test(start) || !LOCAL_DT.test(end) || end <= start) fail(400, 'A job has an invalid time.');
     const crew = str(x.crew, 60) || 'Crew 1', men = Math.max(1, Math.min(20, parseInt(x.men, 10) || 2));
@@ -665,9 +675,33 @@ async function applySchedule(env, me, body) {
       created.push({ id: jid, quote: q.number, start });
     }
   }
+  if (flows.length) {
+    const st = await scheduleSettings(env);
+    const moves = list.filter((x) => !x.flow && x.id).map((x) => ({ id: str(x.id, 40), crew: str(x.crew, 60) || 'Crew 1', start: str(x.start, 16), end: str(x.end, 16) }));
+    for (const x of flows) {
+      const start = str(x.start, 16), crew = str(x.crew, 60) || 'Crew 1', men = Math.max(1, Math.min(20, parseInt(x.men, 10) || 2));
+      if (!LOCAL_DT.test(start)) fail(400, 'A job has an invalid time.');
+      let quote, rows = [];
+      if (x.id) {
+        const head = await env.DB.prepare("SELECT * FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(str(x.id, 40)).first();
+        if (!head) fail(404, 'A job was not found — reload the schedule.');
+        rows = head.project_id ? (await env.DB.prepare("SELECT * FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(head.project_id).all()).results : [head];
+        quote = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(head.quote_id).first();
+      } else {
+        quote = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(str(x.quote_id, 40)).first();
+        if (!quote) fail(404, 'That quote was not found.');
+        if (seenQuotes[quote.id] || await env.DB.prepare("SELECT 1 AS x FROM jobs WHERE quote_id = ? AND status != 'Cancelled'").bind(quote.id).first()) fail(409, quote.number + ' is already scheduled.');
+        seenQuotes[quote.id] = true;
+        if (quote.status !== 'Accepted') place.push(env.DB.prepare("UPDATE quotes SET status = 'Accepted', updated_at = datetime('now') WHERE id = ?").bind(quote.id));
+      }
+      const r = await flowProject(env, st, { quote, rows, start, crew, men, totalMH: numOrNull(x.flow_total) ?? numOrNull(x.man_hours), travel: parseInt(x.travel_minutes, 10) || 0, seq: parseInt(x.sequence, 10) || 0, moves });
+      park.push(...r.park); place.push(...r.place); flowed.push(r.info);
+      if (!x.id) created.push({ id: r.info.ids[0], quote: quote.number, start });
+    }
+  }
   await env.DB.batch(park.concat(place));
-  await audit(env, me, 'schedule', 'apply', 'update', { jobs: list.length, created });
-  return json({ ok: true, created });
+  await audit(env, me, 'schedule', 'apply', 'update', { jobs: list.length, created, flowed });
+  return json({ ok: true, created, flowed });
 }
 
 // ---------------- the customer's own quote page (/quote.html#<quote id>.<token>) ----------------
@@ -918,10 +952,117 @@ async function jobDetail(env, jid) {
   const closeout = await env.DB.prepare('SELECT * FROM job_closeouts WHERE job_id = ?').bind(jid).first();
   const tasks = (await env.DB.prepare('SELECT * FROM task_times WHERE job_id = ? ORDER BY rowid').bind(jid).all()).results;
   const plan = await env.DB.prepare("SELECT * FROM recurring_service_plans WHERE job_id = ? ORDER BY created_at DESC LIMIT 1").bind(jid).first();
+  const days = j.project_id ? (await env.DB.prepare("SELECT id, part, parts, start, end, crew, men, man_hours, status, day_log FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(j.project_id).all()).results
+    .map((r) => Object.assign(r, { day_log: r.day_log ? parseJson(r.day_log, null) : null })) : [];
   return json({ job: j, quote: q ? { id: q.id, number: q.number, items: parseJson(q.hedges, []), calculation: parseJson(q.calculation, {}) } : null, plan: q ? jobTasks(q) : null,
-    photos: await Promise.all(photos.map((p) => photoOut(env, p))), closeout: closeout ? Object.assign(closeout, { details: parseJson(closeout.details, {}) }) : null, tasks, trim: plan });
+    photos: await Promise.all(photos.map((p) => photoOut(env, p))), closeout: closeout ? Object.assign(closeout, { details: parseJson(closeout.details, {}) }) : null, tasks, trim: plan, days });
 }
 function minutesBetween(a, b) { const [ah, am] = a.split(':').map(Number), [bh, bm] = b.split(':').map(Number); let d = bh * 60 + bm - (ah * 60 + am); if (d < 0) d += 1440; return d; }
+
+// ---------------- multi-day jobs ----------------
+// A job that is longer than the working day is booked as several "days" (rows in jobs sharing project_id). Day 1 starts
+// where it was dropped and runs to the end of the working day; the rest goes onto the crew's next working days, in the
+// first free gap of at least an hour (30 min either side of other jobs for the drive).
+const hmMin = (t) => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+const atMin = (date, min) => date + 'T' + String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(Math.round(min % 60)).padStart(2, '0');
+const ceil15 = (m) => Math.ceil(m / 15 - 1e-9) * 15;
+function nextDate(date, n) { const d = new Date(date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + (n || 1)); return d.toISOString().slice(0, 10); }
+async function scheduleSettings(env) { const b = await business(env); return Object.assign({}, SCHEDULE_DEFAULTS, b.schedule || {}); }
+function planDays(st, date, startMin, totalMH, men, busy, skipFirst) {
+  const dayS = hmMin(st.dayStart), dayE = hmMin(st.dayEnd), work = st.workDays && st.workDays.length ? st.workDays : [1, 2, 3, 4, 5];
+  let left = Math.max(15, ceil15(totalMH / men * 60));
+  const out = [];
+  // up to 30 min past the end of the day stays on one day rather than leaving a scrap for the next
+  if (!skipFirst) { const cap = dayE - startMin; if (cap >= 30 || left <= cap + 30) { const len = left <= cap + 30 ? left : cap; out.push({ date, s: startMin, e: startMin + len }); left -= len; } }
+  for (let g = 0; left > 0 && g < 90 && out.length < 30; g++) {
+    date = nextDate(date);
+    if (work.indexOf(new Date(date + 'T00:00:00Z').getUTCDay()) < 0) continue;
+    const need = Math.min(60, left), occ = busy(date).map((b) => [b[0] - 30, b[1] + 30]).sort((a, b) => a[0] - b[0]);
+    // free gaps in the working day; use the biggest one
+    let cur = dayS, slot = null;
+    const gaps = [];
+    for (const b of occ) { if (Math.min(b[0], dayE) - cur >= need) gaps.push([cur, Math.min(b[0], dayE)]); cur = Math.max(cur, b[1]); }
+    if (dayE - cur >= need) gaps.push([cur, dayE]);
+    gaps.forEach((g2) => { if (!slot || g2[1] - g2[0] > slot[1] - slot[0]) slot = g2; });
+    if (!slot) continue;
+    const len = Math.min(left, slot[1] - slot[0]);
+    out.push({ date, s: slot[0], e: slot[0] + len }); left -= len;
+  }
+  if (left > 0) fail(409, 'There is not enough free time in the next few months to fit this job — make the day longer or add men.');
+  return out;
+}
+/** Lay out a job (new, single or multi-day) from `start`: returns statements to park the old days and place the new ones.
+    rows: the job's current days (completed days stay put and are counted as done). */
+async function flowProject(env, st, o) {
+  const done = o.rows.filter((r) => r.status === 'Completed'), open = o.rows.filter((r) => r.status !== 'Completed' && r.status !== 'Cancelled');
+  const calc = parseJson(o.quote.calculation, {});
+  const openMH = open.reduce((a, r) => a + (+r.man_hours || 0), 0);
+  const total = Math.max(0.25, o.totalMH != null ? o.totalMH : openMH || (calc.personHours || 1));
+  const date = o.start.slice(0, 10), startMin = hmMin(o.start.slice(11, 16));
+  // what else this crew already has on the following days (other jobs being moved count at their new times)
+  const skip = new Set(open.map((r) => r.id).concat(o.moves.map((x) => x.id)));
+  const others = (await env.DB.prepare("SELECT id, start, end FROM jobs WHERE crew = ? AND status != 'Cancelled' AND start >= ? AND start < ?").bind(o.crew, date, nextDate(date, 120)).all()).results
+    .filter((r) => !skip.has(r.id)).concat(o.moves.filter((x) => x.crew === o.crew));
+  const busy = (d) => others.filter((r) => r.start.slice(0, 10) === d).map((r) => [hmMin(r.start.slice(11, 16)), r.end.slice(0, 10) === d ? hmMin(r.end.slice(11, 16)) : 1440]);
+  const days = planDays(st, date, startMin, total, o.men, busy, o.skipFirst);
+  // man-hours per day; the last day takes what is left so the days add up to the total
+  let given = 0;
+  days.forEach((d, i) => { d.mh = i === days.length - 1 ? Math.max(0.25, Math.round((total - given) * 100) / 100) : Math.round((d.e - d.s) / 60 * o.men * 100) / 100; given += d.mh; });
+  const ids = days.map((d, i) => (open[i] ? open[i].id : newId('job')));
+  const parts = done.length + days.length;
+  const projectId = (o.rows.find((r) => r.project_id) || {}).project_id || (parts > 1 ? (done[0] || {}).id || ids[0] : null);
+  const park = [], place = [], title = (o.quote.cname || 'Job') + ' — ' + o.quote.number;
+  open.forEach((r, i) => park.push(i < days.length ? env.DB.prepare("UPDATE jobs SET crew = '__moving__' || id WHERE id = ?").bind(r.id)
+    : env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE id = ?").bind(r.id)));
+  days.forEach((d, i) => {
+    const start = atMin(d.date, d.s), end = atMin(d.date, Math.min(d.e, 1439)), part = done.length + i + 1, travel = i ? 0 : o.travel, seq = i ? 0 : o.seq;
+    if (open[i]) place.push(env.DB.prepare("UPDATE jobs SET start = ?, end = ?, crew = ?, men = ?, man_hours = ?, travel_minutes = ?, sequence = ?, project_id = ?, part = ?, parts = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(start, end, o.crew, o.men, d.mh, travel, seq, projectId, part, parts, ids[i]));
+    else place.push(env.DB.prepare("INSERT INTO jobs (id, quote_id, customer_id, property_id, title, start, end, crew, status, notes, men, man_hours, travel_minutes, sequence, project_id, part, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', '', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(ids[i], o.quote.id, o.quote.customer_id, o.quote.property_id, title, start, end, o.crew, o.men, d.mh, travel, seq, projectId, part, parts));
+  });
+  if (projectId) place.push(env.DB.prepare("UPDATE jobs SET project_id = ?, parts = ? WHERE status = 'Completed' AND id IN (SELECT value FROM json_each(?))").bind(projectId, parts, JSON.stringify(done.map((r) => r.id))));
+  return { park, place, info: { customer: o.quote.cname, ids, days: days.map((d) => atMin(d.date, d.s)), parts, total } };
+}
+/** Re-spread a job's remaining days (after changing men or hours), or add another day to it. */
+async function reflowJob(env, me, jid, action, body) {
+  const j = await env.DB.prepare("SELECT * FROM jobs WHERE id = ? AND status != 'Cancelled'").bind(jid).first();
+  if (!j) fail(404, 'That job was not found.');
+  const rows = j.project_id ? (await env.DB.prepare("SELECT * FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(j.project_id).all()).results : [j];
+  const open = rows.filter((r) => r.status !== 'Completed'), st = await scheduleSettings(env);
+  const quote = await env.DB.prepare('SELECT q.*, c.name AS cname FROM quotes q JOIN customers c ON c.id = q.customer_id WHERE q.id = ?').bind(j.quote_id).first();
+  const men = Math.max(1, Math.min(20, parseInt(body.men, 10) || (open[0] || j).men || 2));
+  let total = open.reduce((a, r) => a + (+r.man_hours || 0), 0), start, skipFirst = false;
+  if (numOrNull(body.totalManHours) != null) total = Math.max(0.25, numOrNull(body.totalManHours));
+  if (action === 'addday') total += Math.max(0.25, numOrNull(body.manHours) || (hmMin(st.dayEnd) - hmMin(st.dayStart)) / 60 * men);
+  if (open.length) start = open[0].start;
+  else { start = atMin(rows[rows.length - 1].start.slice(0, 10), hmMin(st.dayStart)); skipFirst = true; } // every day is done: book the next free working day
+  const r = await flowProject(env, st, { quote, rows, start, crew: (open[0] || j).crew, men, totalMH: total, travel: open[0] ? open[0].travel_minutes : 0, seq: open[0] ? open[0].sequence || 0 : 0, moves: [], skipFirst });
+  await env.DB.batch(r.park.concat(r.place));
+  await audit(env, me, 'job', jid, action, r.info);
+  return json({ ok: true, flowed: r.info });
+}
+/** End-of-day check-in for one day of a multi-day job. */
+async function checkinJob(env, me, jid, body) {
+  const j = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?').bind(jid).first();
+  if (!j || j.status === 'Cancelled') fail(404, 'That job was not found.');
+  const arrived = /^\d{2}:\d{2}$/.test(body.arrived || '') ? body.arrived : j.start.slice(11, 16), finished = /^\d{2}:\d{2}$/.test(body.finished || '') ? body.finished : j.end.slice(11, 16);
+  const men = Math.max(1, Math.min(20, parseInt(body.men, 10) || j.men || 2)), breaks = Math.max(0, Math.min(600, parseInt(body.breakMinutes, 10) || 0));
+  const onsite = minutesBetween(arrived, finished);
+  if (onsite <= 0 || onsite > 16 * 60) fail(400, 'Check the start and finish times.');
+  const progress = Math.max(1, Math.min(99, parseInt(body.progress, 10) || 50));
+  const log = { date: j.start.slice(0, 10), arrived, finished, men, breakMinutes: breaks, onsiteMH: Math.round(onsite / 60 * men * 100) / 100, workingMH: Math.round(Math.max(0, onsite - breaks) / 60 * men * 100) / 100,
+    progress, notes: str(body.notes, 1000), by: me.id, at: new Date().toISOString() };
+  const now = new Date().toISOString();
+  await env.DB.prepare("UPDATE jobs SET status = 'Completed', day_log = ?, men = ?, actual_hours = ?, started_at = coalesce(started_at, ?), completed_at = coalesce(completed_at, ?), updated_at = datetime('now') WHERE id = ?")
+    .bind(JSON.stringify(log), men, log.workingMH, now, now, jid).run();
+  const rows = j.project_id ? (await env.DB.prepare("SELECT id, start, status, man_hours, day_log FROM jobs WHERE project_id = ? AND status != 'Cancelled' ORDER BY part").bind(j.project_id).all()).results : [];
+  const doneMH = rows.reduce((a, r) => a + (r.day_log ? parseJson(r.day_log, {}).workingMH || 0 : 0), 0);
+  const open = rows.filter((r) => r.status !== 'Completed'), bookedMH = open.reduce((a, r) => a + (+r.man_hours || 0), 0);
+  const needMH = Math.round(doneMH * (100 - progress) / progress * 100) / 100;
+  await audit(env, me, 'job', jid, 'checkin', log);
+  return json({ ok: true, log, doneMH: Math.round(doneMH * 100) / 100, needMH, bookedMH: Math.round(bookedMH * 100) / 100, next: open[0] ? { id: open[0].id, start: open[0].start } : null });
+}
 async function closeoutJob(env, me, jid, body) {
   const j = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?').bind(jid).first();
   if (!j) fail(404, 'That job was not found.');
@@ -932,7 +1073,11 @@ async function closeoutJob(env, me, jid, body) {
   const men = Math.max(1, Math.min(20, parseInt(body.men, 10) || j.men || plan.crew || 2)), breaks = Math.max(0, Math.min(600, parseInt(body.breakMinutes, 10) || 0));
   const onsite = minutesBetween(arrived, finished);
   if (onsite <= 0 || onsite > 16 * 60) fail(400, 'Check the arrival and finish times.');
-  const onsiteMH = Math.round(onsite / 60 * men * 100) / 100, workingMH = Math.round(Math.max(0, onsite - breaks) / 60 * men * 100) / 100;
+  let onsiteMH = Math.round(onsite / 60 * men * 100) / 100, workingMH = Math.round(Math.max(0, onsite - breaks) / 60 * men * 100) / 100;
+  // a multi-day job: add the days already checked in
+  const earlier = j.project_id ? (await env.DB.prepare("SELECT day_log FROM jobs WHERE project_id = ? AND id != ? AND status = 'Completed' AND day_log IS NOT NULL").bind(j.project_id, jid).all()).results.map((r) => parseJson(r.day_log, {})) : [];
+  const prevWorking = earlier.reduce((a, l) => a + (l.workingMH || 0), 0), prevOnsite = earlier.reduce((a, l) => a + (l.onsiteMH || 0), 0);
+  onsiteMH = Math.round((onsiteMH + prevOnsite) * 100) / 100; workingMH = Math.round((workingMH + prevWorking) * 100) / 100;
   const given = Array.isArray(body.tasks) ? body.tasks : [];
   const rows = plan.tasks.map((t) => { const g = given.find((x) => x && x.key === t.key) || {}; return Object.assign({}, t, { actual: Math.max(0, numOrNull(g.actual) || 0), condition: str(g.condition, 40) || t.condition }); });
   (given || []).filter((g) => g && g.key && String(g.key).startsWith('extra:') && numOrNull(g.actual) > 0).forEach((g) => rows.push({ key: g.key, category: 'other', service: null, name: str(g.name, 80) || 'Other', unit: null, qty: null, est: 0, actual: numOrNull(g.actual) }));
@@ -942,7 +1087,11 @@ async function closeoutJob(env, me, jid, body) {
   stmts.push(env.DB.prepare('DELETE FROM job_closeouts WHERE job_id = ?').bind(jid));
   stmts.push(env.DB.prepare('INSERT INTO job_closeouts (id, job_id, quote_id, work_date, arrived, finished, men, break_minutes, onsite_man_hours, working_man_hours, estimated_man_hours, access, waste_m3, picker_used, notes, details, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(cid, jid, q.id, date, arrived, finished, men, breaks, onsiteMH, workingMH, plan.estimate || null, str(body.access, 20) || null, numOrNull(body.wasteM3), body.pickerUsed == null ? null : body.pickerUsed ? 1 : 0, str(body.notes, 2000),
-      JSON.stringify({ issues: Array.isArray(body.issues) ? body.issues.map((x) => str(x, 40)).slice(0, 10) : [], weather: str(body.weather, 40) }), me.id));
+      JSON.stringify({ issues: Array.isArray(body.issues) ? body.issues.map((x) => str(x, 40)).slice(0, 10) : [], weather: str(body.weather, 40), days: earlier.length + 1, earlierWorkingMH: Math.round(prevWorking * 100) / 100 }), me.id));
+  if (j.project_id) { // this is the last day: any later days still booked are no longer needed
+    stmts.push(env.DB.prepare("UPDATE jobs SET status = 'Cancelled', updated_at = datetime('now') WHERE project_id = ? AND part > ? AND status IN ('Scheduled','In progress')").bind(j.project_id, j.part));
+    stmts.push(env.DB.prepare("UPDATE jobs SET parts = ? WHERE project_id = ? AND status != 'Cancelled'").bind(j.part, j.project_id));
+  }
   rows.filter((r) => r.actual > 0 || r.est > 0).forEach((r) => stmts.push(env.DB.prepare('INSERT INTO task_times (id, job_id, work_date, category, service, name, unit, qty, tier, height, condition, est_man_hours, actual_man_hours, men) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(newId('tsk'), jid, date, r.category, r.service ?? null, r.name, r.unit ?? null, r.qty ?? null, r.tier ?? null, r.height ?? null, r.condition ?? null, r.est ?? null, Math.round(r.actual * 100) / 100, men)));
   const now = new Date().toISOString();
