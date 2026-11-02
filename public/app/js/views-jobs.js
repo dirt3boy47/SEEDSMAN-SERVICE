@@ -62,127 +62,252 @@
     });
   }
 
-  // ---------------- the close-out questionnaire ----------------
+  // ---------------- the close-out: a guided, one-question-at-a-time flow (built for iPhone) ----------------
   function closeout(d, onDone) {
-    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice();
-    var st = { step: 0, date: j.start.slice(0, 10), arrived: j.start.slice(11, 16), finished: j.end.slice(11, 16), men: j.men || j.crew_size || plan.crew || 2, breaks: 30,
-      tasks: plan.tasks.map(function (t) { return { key: t.key, name: t.name, qty: t.qty, unit: t.unit, est: t.est, tier: t.tier, condition: t.condition, service: t.service, actual: null }; }),
-      extras: [], access: 'Normal', waste: plan.wasteEst ? Math.round(plan.wasteEst * 10) / 10 : '', picker: plan.needsPicker, issues: [], notes: '', months: 4 };
-    if (d.closeout) { // editing: start from what was recorded
-      var c = d.closeout; st.date = c.work_date; st.arrived = c.arrived; st.finished = c.finished; st.men = c.men; st.breaks = c.break_minutes;
-      st.access = c.access || 'Normal'; st.waste = c.waste_m3 != null ? c.waste_m3 : st.waste; st.picker = !!c.picker_used; st.notes = c.notes || ''; st.issues = (c.details && c.details.issues) || [];
-      (d.tasks || []).forEach(function (row) { var t = st.tasks.filter(function (x) { return x.name === row.name && (x.service || null) === (row.service || null); })[0]; if (t) { t.actual = row.actual_man_hours; if (row.condition) t.condition = row.condition; } else if (row.category === 'other') st.extras.push({ key: 'extra:' + row.id, name: row.name, est: 0, actual: row.actual_man_hours }); });
-      st._w = Math.round(Math.max(0, (function (a, b) { var x = a.split(':'), y = b.split(':'), m = (+y[0] * 60 + +y[1]) - (+x[0] * 60 + +x[1]); return m < 0 ? m + 1440 : m; })(st.arrived, st.finished) - st.breaks) / 60 * st.men * 100);
-      st.months = d.trim && d.trim.active ? d.trim.interval_months : 0;
-    }
-    var STEPS = ['On site', 'Breaks', 'Time per task', 'How it went', 'Photos', 'Next trim', 'Review'];
-    function mins(a, b) { var x = a.split(':'), y = b.split(':'), m = (+y[0] * 60 + +y[1]) - (+x[0] * 60 + +x[1]); return m < 0 ? m + 1440 : m; }
-    function onsiteMH() { return mins(st.arrived, st.finished) / 60 * st.men; }
-    function workingMH() { return Math.max(0, mins(st.arrived, st.finished) - st.breaks) / 60 * st.men; }
-    function allocated() { return st.tasks.concat(st.extras).reduce(function (s, t) { return s + (+t.actual || 0); }, 0); }
-    function splitByEstimate() {
-      var w = workingMH(), est = st.tasks.reduce(function (s, t) { return s + (t.est || 0); }, 0);
-      st.tasks.forEach(function (t) { t.actual = est ? Math.round(w * (t.est || 0) / est * 4) / 4 : Math.round(w / st.tasks.length * 4) / 4; });
-      var diff = Math.round((w - allocated()) * 4) / 4; if (st.tasks.length && diff) st.tasks[0].actual = Math.max(0, st.tasks[0].actual + diff);
-    }
-    var m = App.modal('<div class="co"><div class="co-steps" id="co-steps"></div><div id="co-body"></div><div class="actions"><button class="btn" id="co-back">Back</button><span class="spacer"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="co-next">Next</button></div></div>', { wide: true, noFocus: true });
-    var body = m.el.querySelector('#co-body');
-    function stepper(id, val, step, unit) { return '<div class="stepper big"><button class="ib" data-st="' + id + '" data-d="-' + step + '">−</button><b data-v="' + id + '">' + val + '</b><button class="ib" data-st="' + id + '" data-d="' + step + '">+</button></div>' + (unit ? '<span class="muted small" style="margin-left:6px">' + unit + '</span>' : ''); }
-    function chips(name, opts, cur) { return '<div class="chips">' + opts.map(function (o) { var v = Array.isArray(o) ? o[0] : o, l = Array.isArray(o) ? o[1] : o; return '<button type="button" class="chipb' + (String(v) === String(cur) ? ' on' : '') + '" data-chip="' + name + '" data-val="' + esc(v) + '">' + esc(l) + '</button>'; }).join('') + '</div>'; }
-    function render() {
-      m.el.querySelector('#co-steps').innerHTML = STEPS.map(function (s, i) { return '<span class="' + (i === st.step ? 'on' : i < st.step ? 'done' : '') + '">' + (i < st.step ? '✓ ' : (i + 1) + '. ') + s + '</span>'; }).join('');
-      m.el.querySelector('#co-back').disabled = st.step === 0;
-      m.el.querySelector('#co-next').textContent = st.step === STEPS.length - 1 ? 'Complete job' : 'Next';
-      var h = '';
-      if (st.step === 0) {
-        h = '<h2>Close out · ' + esc(j.customer) + '</h2><p class="sub">' + esc([j.address, j.suburb].filter(Boolean).join(', ')) + ' · estimated ' + hm(plan.estimate) + ' man-hours</p>' +
-          '<div class="grid3"><label class="field">Date<input type="date" id="co-date" value="' + st.date + '"></label><label class="field">Arrived<input type="time" id="co-arr" value="' + st.arrived + '"></label><label class="field">Finished<input type="time" id="co-fin" value="' + st.finished + '"></label></div>' +
-          '<div class="co-q"><div class="field">How many men were on site?</div>' + stepper('men', st.men, 1, 'men') + '</div>' +
-          '<div class="co-sum">On site ' + hm(mins(st.arrived, st.finished) / 60) + ' × ' + st.men + ' men = <b>' + hm(onsiteMH()) + '</b> man-hours</div>';
-      } else if (st.step === 1) {
-        h = '<h2>Breaks</h2><p class="sub">Total break time the crew took (smoko, lunch). It comes off the working time.</p>' + chips('breaks', [[0, 'None'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1 h']], st.breaks) +
-          '<label class="field" style="max-width:200px;margin-top:10px">Or minutes<input type="number" min="0" step="5" id="co-brk" value="' + st.breaks + '"></label>' +
-          '<div class="co-sum">Working time: <b>' + hm(workingMH()) + '</b> man-hours (' + hm(onsiteMH()) + ' on site − ' + hm(st.breaks / 60 * st.men) + ' breaks)</div>';
-      } else if (st.step === 2) {
-        var wNow = Math.round(workingMH() * 100); // re-split only when the working time changed (keeps your edits otherwise)
-        if (st.tasks.every(function (t) { return t.actual == null; }) || st._w !== wNow) { splitByEstimate(); st._w = wNow; }
-        var left = Math.round((workingMH() - allocated()) * 100) / 100;
-        h = '<h2>How long did each task take?</h2><p class="sub">In <b>man-hours</b> (2 men for 1 hour = 2). Split from the quote’s estimates — adjust anything that took more or less.</p>' +
-          '<div class="co-tasks">' + st.tasks.concat(st.extras).map(function (t, i) {
-            var isExtra = i >= st.tasks.length;
-            return '<div class="co-task"><div class="grow"><b>' + (isExtra ? '<input class="input" data-xname="' + (i - st.tasks.length) + '" value="' + esc(t.name) + '" style="min-height:32px;padding:4px 8px">' : esc(t.name)) + '</b><small>' +
-              (t.qty != null ? App.qty(t.qty, t.unit) + ' · ' : '') + (t.tier ? t.tier + ' · ' : '') + (t.est ? 'estimated ' + hm(t.est) : 'not in the estimate') + '</small>' +
-              (t.service === 'hedge' ? '<select class="input co-cond" data-cond="' + i + '"></select>' : '') + '</div>' +
-              '<div class="co-time"><button class="ib sm" data-tk="' + i + '" data-d="-0.25">−</button><b>' + hm(t.actual) + '</b><button class="ib sm" data-tk="' + i + '" data-d="0.25">+</button></div>' +
-              (t.est ? '<span class="co-var ' + ((t.actual || 0) > t.est * 1.1 ? 'over' : (t.actual || 0) < t.est * 0.9 ? 'under' : '') + '">' + pctDiff(t.actual || 0, t.est) + '</span>' : '<span class="co-var"></span>') + '</div>';
-          }).join('') + '</div>' +
-          '<div class="row" style="margin-top:8px"><button class="btn sm" id="co-split">Split by estimate again</button><button class="btn sm" id="co-extra">' + icon('plus') + 'Another task (e.g. extra pruning)</button></div>' +
-          '<div class="co-sum ' + (Math.abs(left) > 0.13 ? 'warn' : '') + '">Working time ' + hm(workingMH()) + ' · allocated ' + hm(allocated()) + ' · <b>' + (Math.abs(left) <= 0.13 ? 'all allocated ✓' : (left > 0 ? hm(left) + ' not allocated yet' : hm(-left) + ' more than the working time')) + '</b></div>';
-      } else if (st.step === 3) {
-        h = '<h2>How did it go?</h2><div class="co-q"><div class="field">Access</div>' + chips('access', ['Easy', 'Normal', 'Difficult'], st.access) + '</div>' +
-          '<div class="co-q"><div class="field">Anything that slowed you down?</div>' + chips('issues', ['Overgrown', 'Steep / uneven', 'Tight access', 'Wet weather', 'Hot weather', 'Equipment trouble', 'Customer requests', 'Extra waste'], '__multi') + '</div>' +
-          '<div class="grid2"><label class="field">Green waste taken (m³)<input type="number" min="0" step="0.5" id="co-waste" value="' + st.waste + '" placeholder="estimated ' + (plan.wasteEst || 0).toFixed(1) + '"></label>' +
-          '<label class="check" style="margin-top:22px"><input type="checkbox" id="co-pick"' + (st.picker ? ' checked' : '') + '> Cherry picker used</label>' +
-          '<label class="field span2">Notes for next time<textarea id="co-notes" placeholder="e.g. Dog in back yard; gate code 1234; customer wants it lower next time">' + esc(st.notes) + '</textarea></label></div>';
-      } else if (st.step === 4) {
-        h = '<h2>Photos</h2><p class="sub">Before and after shots for the record and the customer. You can add more later on the job page.</p><div id="co-photos">' + photosHtml(photos) + '</div>';
-      } else if (st.step === 5) {
-        var due = function (mo) { var dd = new Date(st.date + 'T00:00:00'); dd.setMonth(dd.getMonth() + mo); return dd.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
-        h = '<h2>Next trim</h2><p class="sub">When should this hedge be done again? It will show on the Overview when it’s due, ready to re-quote or re-book in one tap.</p>' +
-          chips('months', [[0, 'No reminder'], [2, '2 months'], [3, '3 months'], [4, '4 months'], [6, '6 months'], [12, '12 months']], st.months) +
-          (st.months ? '<div class="co-sum">Reminder for about <b>' + due(st.months) + '</b></div>' : '');
-      } else {
-        var w = workingMH();
-        h = '<h2>Review</h2><div class="co-review"><div><small>Working man-hours</small><b>' + hm(w) + '</b></div><div><small>Estimated</small><b>' + hm(plan.estimate) + '</b></div><div><small>Difference</small><b class="' + (w > plan.estimate * 1.1 ? 'over' : w < plan.estimate * 0.9 ? 'under' : '') + '">' + pctDiff(w, plan.estimate) + '</b></div><div><small>Breaks</small><b>' + st.breaks + ' min</b></div></div>' +
-          '<table class="tbl" style="margin-top:10px"><thead><tr><th>Task</th><th class="r">Estimate</th><th class="r">Actual</th><th class="r">±</th></tr></thead><tbody>' + st.tasks.concat(st.extras).map(function (t) { return '<tr><td>' + esc(t.name) + '</td><td class="r">' + (t.est ? hm(t.est) : '—') + '</td><td class="r">' + hm(t.actual) + '</td><td class="r">' + pctDiff(t.actual || 0, t.est) + '</td></tr>'; }).join('') + '</tbody></table>' +
-          '<p class="muted small">' + photos.length + ' photo' + (photos.length === 1 ? '' : 's') + ' · access ' + esc(st.access) + (st.months ? ' · next trim in ' + st.months + ' months' : '') + '</p>';
-      }
-      body.innerHTML = h;
-      if (st.step === 2) App.me().then(function (me) {
-        body.querySelectorAll('[data-cond]').forEach(function (sel) { var t = st.tasks.concat(st.extras)[+sel.getAttribute('data-cond')]; sel.innerHTML = me.rates.conditions.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === (t.condition || 'maintained') ? ' selected' : '') + '>Actual: ' + esc(c.label) + '</option>'; }).join(''); });
+    var j = d.job, plan = d.plan || { tasks: [], estimate: 0, crew: 2 }, photos = d.photos.slice(), SAVE = 'seedsman-closeout-' + j.id;
+    var conds = [], names = { maintained: 'Well kept — a regular trim', overgrown: 'Overgrown — hadn’t been cut for a while', reduction: 'Very overgrown — a hard cut back' };
+    App.me().then(function (me) { conds = me.rates.conditions; });
+    function toMin(t) { var p = (t || '0:0').split(':'); return +p[0] * 60 + +p[1]; }
+    function clock(t) { var m = toMin(t), h = Math.floor(m / 60) % 24, mm = m % 60; return (h % 12 || 12) + (mm ? ':' + String(mm).padStart(2, '0') : '') + (h < 12 ? 'am' : 'pm'); }
+    function dur(min) { min = Math.max(0, Math.round(min)); var h = Math.floor(min / 60), m = min % 60; return h && m ? h + ' h ' + m + ' min' : h ? h + (h === 1 ? ' hour' : ' hours') : m + ' min'; }
+    function addMin(t, m) { var x = (toMin(t) + Math.round(m)) % 1440; return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); }
+    function q15(m) { return Math.max(15, Math.round(m / 15) * 15); }
+
+    // answers
+    var A = { arrived: j.start.slice(11, 16), arrivedOk: false, finished: j.end.slice(11, 16), finishedOk: false, men: null, breaks: null,
+      task: {}, cond: {}, extra: null, access: null, slow: [], waste: null, picker: null, photoSkip: false, notes: null, months: null, date: j.start.slice(0, 10) };
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch (e) { /* ignore */ }
+    var resumeAt = 0;
+    if (saved && saved.A) { A = Object.assign(A, saved.A); resumeAt = saved.i || 0; }
+    else if (d.closeout) { // editing a job that is already closed out: fill in what was recorded, start on the check screen
+      var c = d.closeout, cm = c.men || 2;
+      Object.assign(A, { arrived: c.arrived, arrivedOk: true, finished: c.finished, finishedOk: true, men: cm, breaks: c.break_minutes || 0, access: c.access || 'Normal',
+        slow: (c.details && c.details.issues && c.details.issues.length) ? c.details.issues : ['Nothing slowed us down'], waste: c.waste_m3 != null ? c.waste_m3 : 0,
+        picker: c.picker_used == null ? null : !!c.picker_used, notes: c.notes || '', months: 0, photoSkip: true, extra: false, date: c.work_date || A.date });
+      (d.tasks || []).forEach(function (row) {
+        var t = plan.tasks.filter(function (x) { return x.name === row.name && (x.service || null) === (row.service || null); })[0], min = Math.round((row.actual_man_hours || 0) / cm * 60 / 5) * 5;
+        if (t) { A.task[t.key] = min; if (row.condition) A.cond[t.key] = row.condition; }
+        else if (row.category === 'other' && !/^Other time/.test(row.name)) A.extra = { name: row.name, min: min };
       });
-      if (st.step === 3) body.querySelectorAll('[data-chip=issues]').forEach(function (b) { b.classList.toggle('on', st.issues.indexOf(b.getAttribute('data-val')) >= 0); });
-      if (st.step === 4) wirePhotos(body.querySelector('#co-photos'), j.id, photos, function () { body.querySelector('#co-photos').innerHTML = photosHtml(photos); });
+      plan.tasks.forEach(function (t) { if (A.task[t.key] == null) A.task[t.key] = 0; if (t.service === 'hedge' && !A.cond[t.key]) A.cond[t.key] = t.condition || 'maintained'; });
+      resumeAt = -1; // = summary
     }
-    function read() {
-      var v = function (id) { var e = body.querySelector('#' + id); return e ? e.value : null; };
-      if (st.step === 0) { st.date = v('co-date') || st.date; st.arrived = v('co-arr') || st.arrived; st.finished = v('co-fin') || st.finished; }
-      if (st.step === 1 && v('co-brk') != null) st.breaks = Math.max(0, parseInt(v('co-brk'), 10) || 0);
-      if (st.step === 3) { st.waste = v('co-waste'); st.picker = body.querySelector('#co-pick').checked; st.notes = v('co-notes'); }
+    function save(i) { try { localStorage.setItem(SAVE, JSON.stringify({ A: A, i: i })); } catch (e) { /* ignore */ } }
+
+    function onsite() { var m = toMin(A.finished) - toMin(A.arrived); return m < 0 ? m + 1440 : m; }
+    function working() { return Math.max(0, onsite() - (A.breaks || 0)); } // team minutes
+    function used(exceptKey) { var s = 0; Object.keys(A.task).forEach(function (k) { if (k !== exceptKey) s += A.task[k] || 0; }); if (A.extra && A.extra.min && exceptKey !== '__extra') s += A.extra.min; return s; }
+    var men = function () { return A.men || j.men || plan.crew || 2; };
+    var estTeam = function (t) { return (t.est || 0) * 60 / men(); }; // estimate in team minutes
+
+    // ---- the questions ----
+    var Q = [];
+    Q.push({ label: 'Start time', id: 'arrived', title: 'Did you start at ' + clock(j.start.slice(11, 16)) + '?', sub: 'The time the crew arrived on site.', kind: 'confirmTime', key: 'arrived', ok: 'arrivedOk' });
+    Q.push({ label: 'Finish time', id: 'finished', title: 'Did you finish at ' + clock(j.end.slice(11, 16)) + '?', sub: 'The time you packed up and left.', kind: 'confirmTime', key: 'finished', ok: 'finishedOk',
+      check: function () { return onsite() > 0 && onsite() <= 16 * 60 ? '' : 'The finish time needs to be after the start time.'; } });
+    Q.push({ label: 'People', id: 'men', title: 'How many people worked on this job?', sub: 'Count everyone, including you.', kind: 'number', key: 'men' });
+    Q.push({ label: 'Breaks', id: 'breaks', title: 'How long were your breaks, all up?', sub: 'Smoko and lunch together. If everyone stopped at the same time, count it once.', kind: 'choice', key: 'breaks',
+      options: [[0, 'No breaks'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [90, '1½ hours']] });
+    plan.tasks.forEach(function (t, ti) {
+      var last = ti === plan.tasks.length - 1;
+      Q.push({ id: 'task:' + t.key, label: t.category === 'setup' ? 'Setup & clean-up' : t.name, kind: 'duration', task: t, last: last,
+        title: t.category === 'setup' ? 'How long did setting up, cleaning up and loading take?' : 'How long did the ' + t.name.toLowerCase() + ' take?',
+        sub: (t.qty != null ? App.qty(t.qty, t.unit) + ' · ' : '') + 'We guessed about ' + dur(q15(estTeam(t))) + '. Answer for the whole team working together.' });
+      if (t.service === 'hedge') Q.push({ id: 'cond:' + t.key, label: t.name + ' — condition', kind: 'condition', task: t, title: 'What was the ' + t.name.toLowerCase() + ' like?', sub: 'This helps us price it right next time.' });
+    });
+    Q.push({ label: 'Extra work', id: 'extra', kind: 'extra', title: 'Did you do any other work that wasn’t on the quote?', sub: 'For example extra pruning or weeding the customer asked for.' });
+    Q.push({ label: 'Access', id: 'access', kind: 'choice', key: 'access', title: 'How easy was it to get to?', sub: 'Getting gear in and working around the hedge.', options: [['Easy', 'Easy'], ['Normal', 'Normal'], ['Difficult', 'Hard']] });
+    Q.push({ label: 'Slowed down by', id: 'slow', kind: 'multi', key: 'slow', title: 'Did anything slow you down?', sub: 'Tap all that apply.', options: ['More overgrown than expected', 'Steep or uneven ground', 'Tight access', 'Wet weather', 'Hot weather', 'Equipment trouble', 'Customer asked for extras', 'More waste than expected'], none: 'Nothing slowed us down' });
+    Q.push({ label: 'Green waste', id: 'waste', kind: 'choice', key: 'waste', title: 'How much green waste did you take away?', sub: 'A 6×4 trailer, heaped, holds about 2 m³.',
+      options: [[0, 'None'], [0.5, 'A little (under 1 m³)'], [1, 'About 1 m³'], [2, 'About 2 m³ (one trailer)'], [3, 'About 3 m³'], [4, 'About 4 m³ (two trailers)'], [6, 'More than 4 m³']] });
+    if (plan.needsPicker) Q.push({ label: 'Cherry picker', id: 'picker', kind: 'choice', key: 'picker', title: 'Did you use the cherry picker?', options: [[true, 'Yes'], [false, 'No']] });
+    Q.push({ label: 'Photos', id: 'photos', kind: 'photos', title: 'Take a photo of the finished job', sub: 'One or two “after” shots. They go on the job and can be shown to the customer.' });
+    Q.push({ label: 'Notes', id: 'notes', kind: 'notes', title: 'Anything we should know for next time?', sub: 'Tap to add, or type your own.', quick: ['Dog on site', 'Gate code needed', 'Customer wants it lower', 'Power lines nearby', 'Park on the street', 'Watch the garden beds'] });
+    Q.push({ label: 'Next trim', id: 'months', kind: 'choice', key: 'months', title: 'When should we come back for the next trim?', sub: 'We’ll remind you when it’s due.',
+      options: [[3, 'In 3 months'], [4, 'In 4 months'], [6, 'In 6 months'], [12, 'In 12 months'], [0, d.closeout ? 'Leave the reminder as it is' : 'Don’t remind me']] });
+    Q.push({ id: 'summary', kind: 'summary', title: 'Check and finish' });
+
+    function done(q) {
+      if (q.kind === 'confirmTime') return A[q.ok] === true && (!q.check || !q.check());
+      if (q.kind === 'number' || q.kind === 'choice') return A[q.key] != null;
+      if (q.kind === 'duration') return A.task[q.task.key] != null;
+      if (q.kind === 'condition') return !!A.cond[q.task.key];
+      if (q.kind === 'extra') return A.extra === false || !!(A.extra && A.extra.min);
+      if (q.kind === 'multi') return A.slow.length > 0;
+      if (q.kind === 'photos') return A.photoSkip || photos.some(function (p) { return p.category === 'after'; });
+      if (q.kind === 'notes') return A.notes != null;
+      return true;
     }
+    function answerText(q) {
+      if (q.kind === 'confirmTime') return clock(A[q.key]);
+      if (q.id === 'men') return A.men + (A.men === 1 ? ' person' : ' people');
+      if (q.id === 'breaks') return A.breaks ? dur(A.breaks) : 'No breaks';
+      if (q.kind === 'duration') return dur(A.task[q.task.key] || 0);
+      if (q.kind === 'condition') { var cid = A.cond[q.task.key], c = conds.filter(function (x) { return x.id === cid; })[0]; return names[cid] || (c ? c.label : cid); }
+      if (q.kind === 'extra') return A.extra && A.extra.min ? A.extra.name + ' · ' + dur(A.extra.min) : 'No';
+      if (q.kind === 'multi') return A.slow.join(', ');
+      if (q.id === 'waste') return (q.options.filter(function (o) { return o[0] === A.waste; })[0] || [0, A.waste + ' m³'])[1];
+      if (q.id === 'access') return A.access === 'Difficult' ? 'Hard' : A.access;
+      if (q.id === 'picker') return A.picker ? 'Yes' : 'No';
+      if (q.kind === 'photos') return photos.length ? photos.length + ' photo' + (photos.length === 1 ? '' : 's') : 'Skipped';
+      if (q.kind === 'notes') return A.notes || 'None';
+      if (q.id === 'months') return A.months ? 'In ' + A.months + ' months' : d.closeout ? 'Leave as it is' : 'No reminder';
+      return '';
+    }
+
+    // ---- the screen ----
+    var el = document.createElement('div'); el.className = 'cx';
+    el.innerHTML = '<header class="cx-top"><button class="cx-x" aria-label="Close">' + icon('close') + '</button><div class="cx-prog"><div class="cx-bar"><i></i></div><span class="cx-count"></span></div></header>' +
+      '<main class="cx-body"></main><footer class="cx-foot"><button class="cx-back">Back</button><button class="cx-next">Next</button></footer>';
+    document.body.appendChild(el); document.body.classList.add('cx-open');
+    var body = el.querySelector('.cx-body'), i = resumeAt < 0 ? Q.length - 1 : Math.min(resumeAt, Q.length - 1), autoT = null;
+    function close() { el.remove(); document.body.classList.remove('cx-open'); window.removeEventListener('hashchange', onNav); }
+    function onNav() { save(i); close(); }
+    window.addEventListener('hashchange', onNav);
+    el.querySelector('.cx-x').onclick = function () { save(i); close(); App.toast('Saved — you can carry on later from the job.'); };
+    el.querySelector('.cx-back').onclick = function () { if (i > 0) { i--; show(); } };
+    el.querySelector('.cx-next').onclick = function () { var q = Q[i]; if (!done(q)) return; if (q.kind === 'summary') return finish(); i++; save(i); show(); };
+    function advanceSoon() { clearTimeout(autoT); autoT = setTimeout(function () { if (done(Q[i])) { i++; save(i); show(); } }, 280); }
+    function big(val, label, on, extraCls) { return '<button class="cx-opt' + (on ? ' on' : '') + (extraCls ? ' ' + extraCls : '') + '" data-v="' + esc(String(val)) + '">' + label + (on ? '<span class="cx-tick">' + icon('check') + '</span>' : '') + '</button>'; }
+
+    function show() {
+      clearTimeout(autoT);
+      var q = Q[i], h = '';
+      el.querySelector('.cx-bar i').style.width = Math.round(i / (Q.length - 1) * 100) + '%';
+      el.querySelector('.cx-count').textContent = q.kind === 'summary' ? 'Last step' : 'Question ' + (i + 1) + ' of ' + (Q.length - 1);
+      el.querySelector('.cx-back').style.visibility = i ? 'visible' : 'hidden';
+      h += '<h1 class="cx-q">' + esc(q.title) + '</h1>' + (q.sub ? '<p class="cx-sub">' + esc(q.sub) + '</p>' : '');
+      if (q.kind === 'confirmTime') {
+        var editing = A[q.ok] === 'edit';
+        h += '<div class="cx-opts">' + big('yes', 'Yes, ' + clock(q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16)), A[q.ok] === true && A[q.key] === (q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16))) + big('no', 'No, a different time', editing || (A[q.ok] === true && A[q.key] !== (q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16)))) + '</div>' +
+          (editing || (A[q.ok] && A[q.key] !== (q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16))) ? '<label class="cx-time"><span>' + (q.key === 'arrived' ? 'Start time' : 'Finish time') + '</span><input type="time" step="300" value="' + A[q.key] + '" data-time="' + q.key + '"></label>' : '') +
+          (q.check && A[q.ok] && q.check() ? '<p class="cx-warn">' + q.check() + '</p>' : '') +
+          (q.key === 'finished' && A.finishedOk && !q.check() ? '<p class="cx-note">On site for <b>' + dur(onsite()) + '</b>.</p>' : '');
+      } else if (q.kind === 'number') {
+        h += '<div class="cx-grid">' + [1, 2, 3, 4, 5, 6, 7, 8].map(function (n) { return big(n, String(n), A.men === n, 'num'); }).join('') + '</div>';
+      } else if (q.kind === 'choice') {
+        h += '<div class="cx-opts">' + q.options.map(function (o) { return big(o[0], esc(o[1]), A[q.key] === o[0]); }).join('') + '</div>';
+        if (q.id === 'breaks' && A.breaks != null) h += '<p class="cx-note">Working time: <b>' + dur(working()) + '</b> (' + dur(onsite()) + ' on site, less breaks)</p>';
+        if (q.id === 'months' && A.months) { var dd = new Date(A.date + 'T00:00:00'); dd.setMonth(dd.getMonth() + A.months); h += '<p class="cx-note">We’ll remind you around <b>' + dd.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>.</p>'; }
+      } else if (q.kind === 'duration') {
+        var e = estTeam(q.task), left = working() - used(q.task.key), cur = A.task[q.task.key];
+        var opts = [0.5, 0.75, 1, 1.25, 1.5, 2].map(function (k) { return q15(e * k || 30 * k); }).filter(function (v, x, arr) { return arr.indexOf(v) === x; });
+        h += '<div class="cx-left' + (left < 0 ? ' over' : '') + '">' + (left > 0 ? 'Time left to account for: <b>' + dur(left) + '</b>' : left === 0 ? 'All of the working time is accounted for' : 'That’s <b>' + dur(-left) + '</b> more than the working time') + '</div>';
+        h += '<div class="cx-opts two">' + (q.last && left > 0 ? big(left, 'All the rest · ' + dur(left), cur === left, 'wide accent') : '') + opts.map(function (m) { return big(m, dur(m), cur === m); }).join('') + '</div>';
+        h += '<div class="cx-adjust"><span>Or set it exactly:</span><button class="cx-step" data-step="-15">−15 min</button><b>' + (cur != null ? dur(cur) : '—') + '</b><button class="cx-step" data-step="15">+15 min</button></div>';
+      } else if (q.kind === 'condition') {
+        h += '<div class="cx-opts">' + (conds.length ? conds : [{ id: 'maintained' }, { id: 'overgrown' }, { id: 'reduction' }]).map(function (c) { return big(c.id, esc(names[c.id] || c.label), A.cond[q.task.key] === c.id); }).join('') + '</div>';
+      } else if (q.kind === 'extra') {
+        h += '<div class="cx-opts">' + big('no', 'No', A.extra === false) + big('yes', 'Yes', !!A.extra) + '</div>';
+        if (A.extra) h += '<label class="cx-field"><span>What was it?</span><input type="text" data-extra-name value="' + esc(A.extra.name || '') + '" placeholder="e.g. Pruned the lemon tree"></label>' +
+          '<div class="cx-sub" style="margin-top:14px">How long did it take?</div><div class="cx-opts two">' + [15, 30, 45, 60, 90, 120].map(function (m) { return big('x' + m, dur(m), A.extra.min === m); }).join('') + '</div>';
+      } else if (q.kind === 'multi') {
+        h += '<div class="cx-opts">' + q.options.map(function (o) { return big(o, esc(o), A.slow.indexOf(o) >= 0); }).join('') + big('__none', esc(q.none), A.slow[0] === q.none, 'muted-opt') + '</div>';
+      } else if (q.kind === 'photos') {
+        var after = photos.filter(function (p) { return p.category === 'after'; }), before = photos.filter(function (p) { return p.category === 'before'; });
+        h += '<label class="cx-camera">' + icon('camera') + '<span>' + (after.length ? 'Take another photo' : 'Take a photo') + '</span><input type="file" accept="image/*" capture="environment" hidden data-up="after"></label>' +
+          '<div class="cx-row"><label class="cx-small">Choose from photos<input type="file" accept="image/*" multiple hidden data-up="after"></label><label class="cx-small">Add a “before” photo<input type="file" accept="image/*" multiple hidden data-up="before"></label></div>' +
+          (photos.length ? '<div class="cx-thumbs">' + photos.map(function (p) { return '<span style="background-image:url(\'' + esc(p.url) + '\')"><em>' + esc(p.category) + '</em></span>'; }).join('') + '</div>' : '') +
+          '<div id="cx-upl"></div>' + (after.length ? '' : '<button class="cx-skip" data-skip>' + (A.photoSkip ? '✓ No photo this time' : 'Skip — no photo this time') + '</button>');
+        if (before.length && !after.length) h += '';
+      } else if (q.kind === 'notes') {
+        h += '<div class="cx-chips">' + q.quick.map(function (n) { return '<button class="cx-chip" data-note="' + esc(n) + '">+ ' + esc(n) + '</button>'; }).join('') + '</div>' +
+          '<textarea class="cx-text" data-notes placeholder="Type a note (optional)">' + esc(A.notes || '') + '</textarea>' +
+          '<button class="cx-skip" data-nonotes>' + (A.notes === '' ? '✓ No notes' : 'No notes') + '</button>';
+      } else if (q.kind === 'summary') {
+        var tasksTotal = used(null), gap = working() - tasksTotal;
+        h += '<div class="cx-sumhead"><div><small>Working time</small><b>' + Math.floor(working() / 60) + 'h' + (working() % 60 ? ' ' + working() % 60 + 'm' : '') + '</b></div><div><small>People</small><b>' + men() + '</b></div><div><small>Man-hours</small><b>' + (Math.round(working() / 60 * men() * 4) / 4) + '</b></div></div>' +
+          (gap > 0 ? '<p class="cx-note">' + dur(gap) + ' isn’t linked to a task — we’ll record it as “other time”. Tap Change on a task if you want to add it there.</p>' : gap < 0 ? '<p class="cx-warn">Your task times add up to <b>' + dur(-gap) + '</b> more than the time you worked. Pick one to fix it:</p><div class="cx-opts" style="margin-top:10px">' +
+            big('fix:shrink', 'Shrink the task times to fit', false) + big('fix:finish', 'We finished later — make it ' + clock(addMin(A.finished, -gap)), false) + '</div>' : '') +
+          '<div class="cx-list">' + Q.slice(0, -1).map(function (qq, qi) { return '<div class="cx-li"><div><small>' + esc(qq.label || qq.title) + '</small><b>' + esc(answerText(qq)) + '</b></div><button data-jump="' + qi + '">Change</button></div>'; }).join('') + '</div>';
+      }
+      body.innerHTML = '<div class="cx-in">' + h + '</div>';
+      body.scrollTop = 0;
+      var next = el.querySelector('.cx-next');
+      next.textContent = q.kind === 'summary' ? 'Finish job' : 'Next';
+      next.disabled = !done(q) || (q.kind === 'summary' && working() - used(null) < -1);
+      next.classList.toggle('go', q.kind === 'summary');
+    }
+
+    // ---- answering ----
+    body.addEventListener('click', function (e) {
+      var q = Q[i], b;
+      if ((b = e.target.closest('[data-jump]'))) { i = +b.getAttribute('data-jump'); show(); return; }
+      if ((b = e.target.closest('[data-step]'))) { var cur = A.task[q.task.key] != null ? A.task[q.task.key] : q15(estTeam(q.task)); A.task[q.task.key] = Math.max(0, cur + +b.getAttribute('data-step')); save(i); show(); return; }
+      if ((b = e.target.closest('[data-note]'))) { var n = b.getAttribute('data-note'); A.notes = (A.notes ? A.notes.replace(/\s+$/, '') + (/[.!]$/.test(A.notes) ? ' ' : '. ') : '') + n; save(i); show(); return; }
+      if (e.target.closest('[data-nonotes]')) { A.notes = ''; save(i); show(); advanceSoon(); return; }
+      if (e.target.closest('[data-skip]')) { A.photoSkip = !A.photoSkip; save(i); show(); if (A.photoSkip) advanceSoon(); return; }
+      b = e.target.closest('.cx-opt'); if (!b) return;
+      var v = b.getAttribute('data-v');
+      if (v === 'fix:shrink') {
+        var tot = used(null), k = tot ? working() / tot : 1;
+        Object.keys(A.task).forEach(function (key) { A.task[key] = Math.round(A.task[key] * k / 5) * 5; });
+        if (A.extra && A.extra.min) A.extra.min = Math.round(A.extra.min * k / 5) * 5;
+        var off = working() - used(null), big1 = Object.keys(A.task).sort(function (a, c) { return A.task[c] - A.task[a]; })[0];
+        if (off && big1) A.task[big1] = Math.max(0, A.task[big1] + off); // rounding leftovers go on the biggest task
+        save(i); show(); return;
+      }
+      if (v === 'fix:finish') { A.finished = addMin(A.finished, used(null) - working()); save(i); show(); return; }
+      if (q.kind === 'confirmTime') {
+        var sched = q.key === 'arrived' ? j.start.slice(11, 16) : j.end.slice(11, 16);
+        if (v === 'yes') { A[q.key] = sched; A[q.ok] = true; save(i); show(); if (!q.check || !q.check()) advanceSoon(); }
+        else { A[q.ok] = 'edit'; show(); var inp = body.querySelector('[data-time]'); if (inp) inp.focus(); }
+        return;
+      }
+      if (q.kind === 'number') { A.men = +v; save(i); show(); advanceSoon(); return; }
+      if (q.kind === 'choice') { var o = q.options.filter(function (x) { return String(x[0]) === v; })[0]; A[q.key] = o[0]; save(i); show(); advanceSoon(); return; }
+      if (q.kind === 'duration') { A.task[q.task.key] = +v; save(i); show(); advanceSoon(); return; }
+      if (q.kind === 'condition') { A.cond[q.task.key] = v; save(i); show(); advanceSoon(); return; }
+      if (q.kind === 'extra') {
+        if (v === 'no') { A.extra = false; save(i); show(); advanceSoon(); return; }
+        if (v === 'yes') { if (!A.extra) A.extra = { name: '', min: null }; save(i); show(); var nm = body.querySelector('[data-extra-name]'); if (nm) nm.focus(); return; }
+        if (v.charAt(0) === 'x') { A.extra.min = +v.slice(1); if (!A.extra.name) A.extra.name = 'Other work'; save(i); show(); return; }
+      }
+      if (q.kind === 'multi') {
+        if (v === '__none') A.slow = [q.none];
+        else { A.slow = A.slow.filter(function (x) { return x !== q.none; }); var ix = A.slow.indexOf(v); if (ix >= 0) A.slow.splice(ix, 1); else A.slow.push(v); }
+        save(i); show(); return;
+      }
+    });
     body.addEventListener('input', function (e) {
       var t = e.target;
-      if (t.id === 'co-arr' || t.id === 'co-fin' || t.id === 'co-date') { read(); var s = body.querySelector('.co-sum'); if (s) s.innerHTML = 'On site ' + hm(mins(st.arrived, st.finished) / 60) + ' × ' + st.men + ' men = <b>' + hm(onsiteMH()) + '</b> man-hours'; }
-      if (t.id === 'co-brk') { read(); body.querySelectorAll('[data-chip=breaks]').forEach(function (b) { b.classList.toggle('on', +b.getAttribute('data-val') === st.breaks); }); var s2 = body.querySelector('.co-sum'); if (s2) s2.innerHTML = 'Working time: <b>' + hm(workingMH()) + '</b> man-hours'; }
-      if (t.hasAttribute('data-xname')) st.extras[+t.getAttribute('data-xname')].name = t.value;
+      if (t.hasAttribute('data-time') && t.value) { A[t.getAttribute('data-time')] = t.value; A[Q[i].ok] = true; save(i); var nx = el.querySelector('.cx-next'); nx.disabled = !done(Q[i]); var w = body.querySelector('.cx-warn'); if (w && done(Q[i])) w.remove(); }
+      if (t.hasAttribute('data-extra-name')) { A.extra.name = t.value; save(i); }
+      if (t.hasAttribute('data-notes')) { A.notes = t.value; save(i); el.querySelector('.cx-next').disabled = false; }
     });
-    body.addEventListener('change', function (e) { var t = e.target; if (t.hasAttribute('data-cond')) st.tasks.concat(st.extras)[+t.getAttribute('data-cond')].condition = t.value; });
-    body.addEventListener('click', function (e) {
-      var b;
-      if ((b = e.target.closest('[data-st]'))) { var k = b.getAttribute('data-st'); st[k] = Math.max(1, Math.min(12, st[k] + +b.getAttribute('data-d'))); render(); return; }
-      if ((b = e.target.closest('[data-tk]'))) { var all = st.tasks.concat(st.extras), t = all[+b.getAttribute('data-tk')]; t.actual = Math.max(0, Math.round(((+t.actual || 0) + +b.getAttribute('data-d')) * 4) / 4); render(); return; }
-      if ((b = e.target.closest('[data-chip]'))) {
-        var n = b.getAttribute('data-chip'), val = b.getAttribute('data-val');
-        if (n === 'issues') { var ix = st.issues.indexOf(val); if (ix >= 0) st.issues.splice(ix, 1); else st.issues.push(val); b.classList.toggle('on'); return; }
-        st[n] = n === 'access' ? val : +val;
-        render(); return;
-      }
-      if (e.target.closest('#co-split')) { splitByEstimate(); render(); return; }
-      if (e.target.closest('#co-extra')) { st.extras.push({ key: 'extra:' + Date.now().toString(36), name: 'Other task', est: 0, actual: 0.5 }); render(); }
+    body.addEventListener('change', function (e) {
+      var t = e.target;
+      if (t.hasAttribute('data-time')) { if (t.value) { A[t.getAttribute('data-time')] = t.value; A[Q[i].ok] = true; save(i); } show(); }
+      var up = t.closest('input[type=file][data-up]'); if (!up || !up.files.length) return;
+      var files = Array.prototype.slice.call(up.files), kind = up.getAttribute('data-up'), box = body.querySelector('#cx-upl');
+      if (box) box.innerHTML = '<p class="cx-note">Uploading ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '…</p>';
+      files.reduce(function (p, f) { return p.then(function () { return upload(j.id, f, kind).then(function (ph) { photos.push(ph); d.photos.push(ph); }); }); }, Promise.resolve())
+        .then(function () { A.photoSkip = false; save(i); show(); })
+        .catch(function (x) { if (box) box.innerHTML = '<p class="cx-warn">' + esc(x.message) + ' — check your signal and try again.</p>'; });
     });
-    m.el.querySelector('#co-back').onclick = function () { read(); if (st.step > 0) { st.step--; render(); } };
-    m.el.querySelector('#co-next').onclick = function () {
-      read();
-      if (st.step === 0 && mins(st.arrived, st.finished) <= 0) return App.toast('Check the arrival and finish times.', 'warn');
-      if (st.step < STEPS.length - 1) { st.step++; render(); return; }
-      var btn = m.el.querySelector('#co-next'); btn.disabled = true;
-      App.post('jobs/' + j.id + '/closeout', { date: st.date, arrived: st.arrived, finished: st.finished, men: st.men, breakMinutes: st.breaks,
-        tasks: st.tasks.concat(st.extras).map(function (t) { return { key: t.key, name: t.name, actual: t.actual || 0, condition: t.condition }; }),
-        access: st.access, issues: st.issues, wasteM3: st.waste, pickerUsed: st.picker, notes: st.notes, nextTrimMonths: st.months })
-        .then(function (r) { m.close(); App.toast('Job closed out — ' + hm(r.workingManHours) + ' working man-hours recorded' + (r.nextTrim ? ', next trim ' + App.date(r.nextTrim) : '') + '.', null, 6000); if (onDone) onDone(); })
-        .catch(function (x) { App.toast(x.message, 'err', 6000); btn.disabled = false; });
-    };
-    render();
+
+    function finish() {
+      var next = el.querySelector('.cx-next'); next.disabled = true; next.textContent = 'Saving…';
+      var m = men(), toMH = function (min) { return Math.round(min / 60 * m * 100) / 100; };
+      var tasks = plan.tasks.map(function (t) { return { key: t.key, name: t.name, actual: toMH(A.task[t.key] || 0), condition: A.cond[t.key] || t.condition }; });
+      if (A.extra && A.extra.min) tasks.push({ key: 'extra:work', name: A.extra.name || 'Other work', actual: toMH(A.extra.min) });
+      var gap = working() - used(null); if (gap >= 15) tasks.push({ key: 'extra:other', name: 'Other time (not linked to a task)', actual: toMH(gap) });
+      App.post('jobs/' + j.id + '/closeout', { date: A.date, arrived: A.arrived, finished: A.finished, men: m, breakMinutes: A.breaks || 0, tasks: tasks,
+        access: A.access, issues: A.slow.filter(function (x) { return x !== 'Nothing slowed us down'; }), wasteM3: A.waste, pickerUsed: A.picker, notes: A.notes || '', nextTrimMonths: A.months || 0 })
+        .then(function (r) {
+          try { localStorage.removeItem(SAVE); } catch (e) { /* ignore */ }
+          var diff = r.estimate ? Math.round((r.workingManHours - r.estimate) / r.estimate * 100) : null;
+          body.innerHTML = '<div class="cx-in cx-done"><div class="cx-big-tick">' + icon('check') + '</div><h1 class="cx-q">Job closed out</h1>' +
+            '<p class="cx-sub">' + esc(j.customer) + ' · ' + r.workingManHours + ' man-hours recorded' + (diff != null ? ' (' + (diff > 0 ? diff + '% more' : diff < 0 ? (-diff) + '% less' : 'right on') + ' than quoted)' : '') + '.</p>' +
+            (r.nextTrim ? '<p class="cx-note">Next trim reminder: <b>' + App.date(r.nextTrim) + '</b></p>' : '') + '<p class="cx-sub">Thanks — this makes the next quote more accurate.</p></div>';
+          el.querySelector('.cx-back').style.visibility = 'hidden'; el.querySelector('.cx-bar i').style.width = '100%'; el.querySelector('.cx-count').textContent = 'Done';
+          next.disabled = false; next.textContent = 'Done'; next.onclick = function () { close(); if (onDone) onDone(); };
+        })
+        .catch(function (x) { next.disabled = false; next.textContent = 'Try again'; App.toast(x.message + ' — your answers are saved.', 'err', 7000); });
+    }
+    show();
+    if (resumeAt > 0) App.toast('Carrying on where you left off.');
   }
 
   // ---------------- job page ----------------
@@ -211,7 +336,9 @@
             '<div><h3>Work</h3><div>' + esc((j.services || 'Hedge trimming').replace(/,/g, ', ')) + '</div><small class="muted">Estimated ' + hm(plan.estimate) + ' man-hours · ' + money(j.total) + ' incl. GST</small></div>' + (j.notes ? '<div><h3>Notes</h3><div style="white-space:pre-wrap">' + esc(j.notes) + '</div></div>' : '') + '</div></div>' +
           '<div class="card"><div class="card-h"><h2>Next trim</h2></div><div class="card-b">' + (d.trim && d.trim.active ? '<div><b>' + App.date(d.trim.due) + '</b> <span class="muted small">every ' + d.trim.interval_months + ' months · ' + esc(d.trim.status) + '</span></div><div class="row" style="margin-top:8px"><button class="btn sm" data-trim="move">Change date</button><button class="btn sm ghost" data-trim="skip" style="color:var(--danger)">No reminder</button></div>'
             : '<p class="muted small" style="margin:0">' + (done ? 'No reminder set.' : 'Set when you close out the job.') + '</p>') + '</div></div>' +
-          '</div></div></div>';
+          '</div></div></div>' + (done ? '' : '<button class="job-fab" id="close-out-fab">' + icon('check') + 'Close out this job</button>');
+        ctx.el.querySelector('.page').classList.add('job-page');
+        var fab = ctx.el.querySelector('#close-out-fab'); if (fab) fab.onclick = function () { closeout(d, load); };
         var ph = ctx.el.querySelector('#photos');
         wirePhotos(ph, j.id, d.photos, function () { ph.innerHTML = photosHtml(d.photos); });
         ctx.el.querySelectorAll('[data-trim]').forEach(function (b) {
