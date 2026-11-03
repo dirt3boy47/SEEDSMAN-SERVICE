@@ -25,6 +25,14 @@
     var gis = GIS.create(container.querySelector('.doc-map-in'), { toolbar: false, interactive: false, basemap: 'world', print: true, start: p.lat != null ? { lat: p.lat, lng: p.lng, zoom: 19 } : null });
     gis.setShapes((q.items || []).filter(function (it) { return it.geometry; }).map(function (it) { return { geometry: it.geometry, color: d.colorOf ? d.colorOf(it) : '#3ddc84', label: it.name }; }));
     if (p.lat != null) gis.setPin(L.latLng(p.lat, p.lng));
+    // phones: the page keeps its real A4 width (so it looks like the PDF) and is shrunk to fit the screen
+    var wrap = container.querySelector('.doc-wrap');
+    var fitDoc = function () {
+      if (!wrap.isConnected) { window.removeEventListener('resize', fitDoc); return; }
+      wrap.style.zoom = ''; var w = container.clientWidth, dw = wrap.firstChild.offsetWidth;
+      if (w && dw > w + 1) wrap.style.zoom = String(Math.max(0.3, Math.floor(w / dw * 1000) / 1000));
+    };
+    fitDoc(); window.addEventListener('resize', fitDoc);
     if (!gis.fit()) container.querySelector('.doc-map').hidden = true;
     return { gis: gis, el: container.querySelector('.doc'), name: name };
   }
@@ -42,7 +50,9 @@
   }
   function pdfNow(docEl) {
     var jsPDF = window.jspdf && window.jspdf.jsPDF;
-    return html2canvas(docEl, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function (canvas) {
+    var wrap = docEl.parentNode, zoom = wrap && wrap.style.zoom; if (zoom) wrap.style.zoom = ''; // capture at full size
+    var undo = function (x) { if (zoom) wrap.style.zoom = zoom; return x; };
+    return html2canvas(docEl, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false, windowWidth: Math.max(window.innerWidth, 1100) }).then(undo, function (e) { undo(); throw e; }).then(function (canvas) {
       var out = new jsPDF({ unit: 'mm', format: 'a4', compress: true }), W = 210, H = 297;
       var pageHpx = Math.floor(canvas.width * H / W), y = 0, first = true;
       while (y < canvas.height) {

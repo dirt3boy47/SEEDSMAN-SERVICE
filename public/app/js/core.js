@@ -149,6 +149,13 @@
     document.getElementById('theme-btn').onclick = function () { applyTheme(isDark() ? 'light' : 'dark'); };
     document.getElementById('out-btn').onclick = function () { call('POST', 'auth/logout').catch(function () {}).then(function () { setToken(''); location.href = '/login.html'; }); };
     document.getElementById('scrim').onclick = function () { document.body.classList.remove('nav-open'); document.getElementById('scrim').hidden = true; };
+    // phones: a bottom tab bar for the everyday pages; More opens the full menu
+    var tabs = document.getElementById('tabbar') || document.body.appendChild(Object.assign(document.createElement('nav'), { id: 'tabbar' }));
+    tabs.setAttribute('aria-label', 'Main');
+    tabs.innerHTML = [['overview', '#/', 'overview', 'Home'], ['quotes', '#/quotes', 'quote', 'Quotes'], ['schedule', '#/schedule', 'calendar', 'Schedule'], ['customers', '#/customers', 'users', 'Customers']]
+      .map(function (t) { return '<a href="' + t[1] + '" data-nav="' + t[0] + '">' + icon(t[2]) + '<span>' + t[3] + '</span></a>'; }).join('') +
+      '<button type="button" data-more>' + icon('more') + '<span>More</span></button>';
+    tabs.querySelector('[data-more]').onclick = function () { document.body.classList.add('nav-open'); document.getElementById('scrim').hidden = false; };
   }
   function setTop(o) {
     o = o || {};
@@ -178,6 +185,7 @@
       var m = routes[i].re.exec(path);
       if (!m) continue;
       document.querySelectorAll('[data-nav]').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-nav') === routes[i].nav); });
+      var more = document.querySelector('#tabbar [data-more]'); if (more) more.classList.toggle('on', ['overview', 'quotes', 'schedule', 'customers'].indexOf(routes[i].nav) < 0);
       var old = document.getElementById('view'), view = document.createElement('div'); // a fresh container: replies for a page you left land nowhere
       view.id = 'view'; old.replaceWith(view);
       window.scrollTo(0, 0);

@@ -423,7 +423,7 @@
         var act = c ? { label: 'Edit close-out', run: 'closeout' } : behind ? { label: 'Check in day ' + behind.part + ' first', go: behind.id }
           : !last ? { label: done ? 'Redo day ' + j.part + ' check-in' : 'End of day check-in', fab: 'Check in for today', run: 'checkin', open: !done }
           : { label: 'Close out job', fab: 'Close out this job', run: 'closeout', open: true };
-        App.setTop({ el: ctx.el, back: '#/schedule?date=' + j.start.slice(0, 10), titleHtml: esc(j.customer) + ' ' + (multi ? '<span class="tag info">Day ' + j.part + ' of ' + j.parts + '</span> ' : '') + App.pill(j.status), sub: [j.address, j.suburb].filter(Boolean).join(', ') + ' · ' + App.date(j.start) + ' ' + App.time(j.start),
+        App.setTop({ el: ctx.el, back: '#/schedule?date=' + j.start.slice(0, 10), titleHtml: '<span class="tt">' + esc(j.customer) + '</span> ' + (multi ? '<span class="tag info">Day ' + j.part + ' of ' + j.parts + '</span> ' : '') + App.pill(j.status), sub: [j.address, j.suburb].filter(Boolean).join(', ') + ' · ' + App.date(j.start) + ' ' + App.time(j.start),
           actions: '<a class="btn" href="#/quotes/' + esc(j.quote_id) + '">' + icon('quote') + '<span class="lbl">' + esc(j.quote_number) + '</span></a><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + (j.lat != null ? j.lat + ',' + j.lng : encodeURIComponent([j.address, j.suburb].join(', '))) + '">' + icon('gps') + '<span class="lbl">Directions</span></a>' +
             '<button class="btn primary" id="close-out">' + icon('check') + '<span class="lbl">' + esc(act.label) + '</span></button>' });
         function doAct() { if (act.go) location.hash = '#/jobs/' + act.go; else closeout(d, load, act.run); }

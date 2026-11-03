@@ -174,12 +174,21 @@
       if (!el.querySelector('.sched')) {
         el.innerHTML = '<div class="sched"><div class="card cal"><div class="cal-bar"><div class="seg sm" id="cal-view">' + [['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(function (v) { return '<button type="button" data-v="' + v[0] + '">' + v[1] + '</button>'; }).join('') + '</div>' +
           '<span class="zoom" id="zoom"><button class="ib sm" data-z="-1" title="Zoom out — see more of the day">−</button><button class="ib sm" data-z="1" title="Zoom in">+</button></span><span class="muted small" id="wk-sum"></span><a class="link small" href="#/settings" id="no-base" hidden>Set your home base to show the drive out and back</a><span class="spacer"></span><label class="small muted" for="crew-sel">Drop onto</label><select id="crew-sel" class="input" style="width:auto;min-height:34px;padding:5px 8px"></select></div><div class="cal-head" id="cal-head"></div><div class="cal-body" id="cal-body"></div><div class="cal-foot" id="cal-foot"></div></div>' +
-          '<aside class="card tray"><div class="card-h"><h2>To schedule <span class="tag" id="tray-n"></span></h2><button class="btn sm" id="tray-add" title="Accept a draft or sent quote">' + icon('plus') + 'Add</button></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
+          '<aside class="card tray"><div class="card-h"><button type="button" class="tray-tog" id="tray-tog" aria-label="Show or hide the jobs to schedule"><h2>To schedule <span class="tag" id="tray-n"></span></h2><span class="chev">' + icon('chev') + '</span></button><button class="btn sm" id="tray-add" title="Accept a draft or sent quote">' + icon('plus') + 'Add</button></div><p class="muted small tray-hint">Accepted quotes. Drag one onto a day — it books the estimated man-hours with the crew size shown.</p><div class="tray-list" id="tray"></div></aside></div>';
         el.querySelector('#crew-sel').onchange = function (e) {
           if (e.target.value === '__new') { var n = prompt('Name of the new crew:', 'Crew ' + (S.crews.length + 1)); if (n) { S.crews.push(n.trim()); S.crew = n.trim(); } renderCrews(); return; }
           S.crew = e.target.value;
         };
         el.querySelector('#tray-add').onclick = addAccepted;
+        el.querySelector('#tray-tog').onclick = function () { S.trayOpen = !S.trayOpen; pref('tray', S.trayOpen ? '1' : '0'); el.querySelector('.tray').classList.toggle('folded', !S.trayOpen); };
+        // phones: swipe left / right on the calendar to go forward / back
+        var sw = null, cbody = el.querySelector('#cal-body');
+        cbody.addEventListener('touchstart', function (e) { if (e.touches.length !== 1 || e.target.closest('.cal-job, .mchip')) { sw = null; return; } sw = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }; }, { passive: true });
+        cbody.addEventListener('touchend', function (e) {
+          if (!sw || drag) { sw = null; return; }
+          var t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, quick = Date.now() - sw.t < 700; sw = null;
+          if (quick && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6 && cbody.scrollWidth <= cbody.clientWidth + 2) document.getElementById(dx < 0 ? 'next' : 'prev').click();
+        }, { passive: true });
         el.querySelector('#cal-body').addEventListener('scroll', function () { var x = el.querySelector('#cal-body').scrollLeft; el.querySelector('#cal-head').scrollLeft = x; el.querySelector('#cal-foot').scrollLeft = x; });
         el.querySelector('#cal-view').onclick = function (e) { var b = e.target.closest('[data-v]'); if (b) setView(b.getAttribute('data-v')); };
         el.querySelector('#zoom').onclick = function (e) {
@@ -207,7 +216,11 @@
       sel.innerHTML = S.crews.map(function (c) { return '<option' + (c === S.crew ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '<option value="__new">+ New crew…</option>';
     }
     function renderTray() {
-      el.querySelector('#tray-n').textContent = S.waiting.length + S.parked.length;
+      var n = S.waiting.length + S.parked.length;
+      el.querySelector('#tray-n').textContent = n;
+      if (S.trayOpen == null) S.trayOpen = pref('tray') != null ? pref('tray') === '1' : window.innerWidth > 760;
+      if (ctx.query.quote) S.trayOpen = true;
+      el.querySelector('.tray').classList.toggle('folded', !S.trayOpen);
       var parkedHtml = S.parked.map(function (j) {
         var t = ceilTo((j.manHours || 1) / Math.max(1, j.men) * 60, SNAP);
         return '<div class="tcard parked" data-pj="' + esc(j.id) + '"><span class="grip" title="Drag onto the calendar">' + icon('grip') + '</span><div class="grow"><b><span class="daytag">Day ' + j.part + '/' + j.parts + '</span>' + esc(j.customer) + '</b><small>' + esc(j.suburb || j.address) + ' · ' + esc(j.quote_number) + '</small>' +
@@ -269,8 +282,8 @@
         var leaves = Object.keys(drives).filter(function (k) { return k.indexOf(d + '|') === 0 && drives[k] && drives[k].out; }).map(function (k) { return drives[k].out.leave; });
         var leave = leaves.length ? Math.min.apply(null, leaves) : null;
         return '<div class="cal-dh' + (d === today ? ' today' : '') + '"><div><span>' + dt.toLocaleDateString('en-AU', { weekday: 'short' }) + '</span> <b>' + dt.getDate() + '</b></div>' +
-          (leave != null ? '<small' + (leave < hm(st.dayStart) ? ' class="late"' : '') + '>Leave base ' + clock(leave) + '</small>' : '') +
-          '<small>' + (list.length ? list.length + ' job' + (list.length === 1 ? '' : 's') + ' · ' + Math.round(hours * 10) / 10 + ' man-h' : '&nbsp;') + '</small>' + (late ? '<small class="late">Runs past ' + clock(hm(st.dayEnd)) + '</small>' : '') +
+          (leave != null ? '<small class="lv' + (leave < hm(st.dayStart) ? ' late' : '') + '">Leave base ' + clock(leave) + '</small>' : '') +
+          '<small class="jn">' + (list.length ? list.length + ' job' + (list.length === 1 ? '' : 's') + '<span class="mh"> · ' + Math.round(hours * 10) / 10 + ' man-h</span>' : '&nbsp;') + '</small>' + (late ? '<small class="late">Runs past ' + clock(hm(st.dayEnd)) + '</small>' : '') +
           (list.length ? '<button class="link small" data-route="' + d + '">' + 'Route</button>' : '') + '</div>';
       }).join('') + '</div>';
       el.querySelector('#no-base').hidden = !!(S.depot && S.depot.lat != null);

@@ -137,7 +137,7 @@
       }
       topKey = key;
       App.setTop({ el: el, back: '#/quotes',
-        titleHtml: esc(S.number ? 'Quote ' + S.number : 'New quote') + (S.number ? ' ' + App.pill(S.status) : ''), sub: sub,
+        titleHtml: '<span class="tt">' + esc(S.number ? 'Quote ' + S.number : 'New quote') + '</span>' + (S.number ? ' ' + App.pill(S.status) : ''), sub: sub,
         actions: '<span class="num" id="q-total" style="font-weight:700;margin-right:6px">' + (t ? money(t.total) : '') + '</span>' +
           (S.id ? '<button class="btn" id="status-btn" title="Change status">' + App.pill(S.status) + icon('chev').replace('class="i"', 'class="i" style="transform:rotate(90deg);width:14px;height:14px"') + '</button>' : '') +
           (S.id ? '<a class="btn" href="#/quotes/' + esc(S.id) + '/document">' + icon('print') + '<span class="lbl">Document</span></a>' : '') +

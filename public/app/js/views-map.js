@@ -8,7 +8,7 @@
     ctx.onLeave(function () { if (gis) gis.destroy(); });
     App.setTop({ title: 'Map', sub: 'Job locations and site drawings', actions: '<a class="btn primary" href="#/quotes/new">' + icon('plus') + '<span class="lbl">New quote</span></a>' });
     ctx.el.className = 'wide';
-    ctx.el.innerHTML = '<div style="position:relative;height:calc(100vh - 92px)"><div id="wmap" style="position:absolute;inset:0"></div>' +
+    ctx.el.innerHTML = '<div class="mapfull"><div id="wmap" style="position:absolute;inset:0"></div>' +
       '<div class="panel" id="wpanel" style="position:absolute;z-index:810;left:10px;top:72px;bottom:10px;width:min(340px,calc(100% - 20px));display:flex;flex-direction:column;overflow:hidden"></div></div>';
     var panel = ctx.el.querySelector('#wpanel');
     App.me().then(function (me) {
@@ -16,7 +16,9 @@
       gis = GIS.create(ctx.el.querySelector('#wmap'), { start: me.business.mapStart, tools: [{ id: 'list', icon: 'sidebar', label: 'Panel' }, { id: 'draw', icon: 'ruler', label: 'Measure' }],
         onTool: function (t, b) { if (t === 'list') { panel.hidden = !panel.hidden; b.classList.toggle('on', !panel.hidden); } if (t === 'draw') measureOnly(); },
         onShapeClick: function (id) { var r = panel.querySelector('[data-d="' + id + '"]'); if (r) r.scrollIntoView({ block: 'center', behavior: 'smooth' }); } });
-      ctx.el.querySelector('[data-tool=list]').classList.add('on');
+      // phones: the map first; the list opens from the Panel button (or when a property is picked)
+      if (window.innerWidth <= 760 && !ctx.query.property) panel.hidden = true;
+      ctx.el.querySelector('[data-tool=list]').classList.toggle('on', !panel.hidden);
       ctx.el.querySelector('.leaflet-top.leaflet-left').style.left = window.innerWidth > 760 ? '350px' : '';
       return App.get('properties');
     }).then(function (d) {
