@@ -172,6 +172,7 @@
         '<p class="err" id="m-err"></p>';
     }
     el.innerHTML = h; el.scrollTop = 0;
+    document.body.classList.toggle('drawing', S.step <= 1); // an arrow (exact point) instead of the hand while placing the pin or drawing
     var panel = $('#panel'), low = S.step === 1 && window.innerWidth <= 860; // phones: the panel drops down while drawing
     if (panel.dataset.lowFor !== String(S.step)) { panel.dataset.lowFor = String(S.step); panel.classList.toggle('low', low); setTimeout(function () { map.invalidateSize(); }, 320); }
     $('#back').style.visibility = S.step ? 'visible' : 'hidden';
