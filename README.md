@@ -68,8 +68,11 @@ and the job is closed out; every quote also gets a card. Dragging to **Won** off
 opens the schedule, to **Quoted** starts the quote (customer and property are set up from the enquiry, matched by phone or
 email), to **Lost** asks why. A card's sheet has Call / Text / Email / Directions (logged; calling a new enquiry moves it to
 Contacted), the next step, follow-up date, details and history. Follow-ups due show on the Overview.
-**Website form**: `/enquiry.html` is a public "ask for a quote" page — link it from your website; enquiries land in
-New enquiry (spam-protected, 5 per hour per connection).
+**Public website** (`/`, files in `public/index.html` and `public/site/`): what customers see — services, how it works,
+why us, areas, FAQ and a free-quote form (address suggestions, up to 3 photos, preferred contact and time). Sending it
+creates a **New enquiry** in the Pipeline with a follow-up for today, so the CRM process starts straight away; photos show
+in the card. Phone, email, ABN and the business name come from Settings › Business details. The staff app is at `/app/`
+(Staff login in the footer). Spam-protected (hidden field, 5 enquiries per hour per connection).
 
 Other pages: **Overview** (open quotes, won this month, win rate, jobs this week, follow-ups), **Customers**,
 **Properties** (job locations with their site drawings, quotes and jobs), **Map** (the full-screen GIS workspace: every job

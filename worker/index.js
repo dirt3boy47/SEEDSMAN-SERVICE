@@ -109,7 +109,7 @@ async function activeRates(env) {
 async function api(request, env, url) {
   const parts = url.pathname.split('/').filter(Boolean).slice(1);
   const m = request.method;
-  const isUpload = parts[0] === 'jobs' && parts[2] === 'photos' && m === 'POST'; // raw image body
+  const isUpload = m === 'POST' && ((parts[0] === 'jobs' && parts[2] === 'photos') || (parts[0] === 'public' && parts[1] === 'enquiry' && parts[3] === 'photo')); // raw image body
   const body = !isUpload && (m === 'POST' || m === 'PUT') ? await request.json().catch(() => ({})) : {};
 
   if (parts[0] === 'auth' && parts[1] === 'login' && m === 'POST') {
@@ -133,7 +133,8 @@ async function api(request, env, url) {
       if (parts[1] === 'logout' && m === 'POST') { await env.DB.prepare('DELETE FROM session WHERE id = ?').bind(me.sid).run(); return json({ ok: true }); }
       break;
     case 'me':
-      if (!id && m === 'GET') return json({ user: publicUser(me), business: clientBusiness(await business(env)), rates: await activeRates(env) });
+      if (!id && m === 'GET') return json({ user: publicUser(me), business: clientBusiness(await business(env)), rates: await activeRates(env),
+        counts: { newLeads: (await env.DB.prepare("SELECT count(*) AS n FROM enquiries WHERE archived_at IS NULL AND status = 'New enquiry'").first()).n } });
       if (id === 'password' && m === 'POST') return changePassword(env, me, body);
       break;
     case 'business': if (m === 'PUT') return saveBusiness(env, me, body); break;
@@ -313,9 +314,10 @@ const LEAD_LIST = "SELECT e.*, q.number AS quote_number, q.status AS quote_statu
   "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS quote_services, " +
   "(SELECT j.id FROM jobs j WHERE j.quote_id = e.quote_id AND j.status != 'Cancelled' ORDER BY j.part LIMIT 1) AS job_id, " +
   "(SELECT min(j.start) FROM jobs j WHERE j.quote_id = e.quote_id AND j.status NOT IN ('Cancelled','Unscheduled')) AS job_start, " +
-  "(SELECT count(*) FROM lead_events v WHERE v.lead_id = e.id AND v.kind IN ('note','call','sms','email')) AS touches " +
+  "(SELECT count(*) FROM lead_events v WHERE v.lead_id = e.id AND v.kind IN ('note','call','sms','email')) AS touches, " +
+  "(SELECT count(*) FROM photos ph WHERE ph.enquiry_id = e.id) AS photo_count " +
   "FROM enquiries e LEFT JOIN quotes q ON q.id = e.quote_id";
-function leadOut(r) { const d = parseJson(r.details, {}); return Object.assign({}, r, { details: undefined, services: d.services || [], message: d.message || '', lat: d.lat ?? null, lng: d.lng ?? null }); }
+function leadOut(r) { const d = parseJson(r.details, {}); return Object.assign({}, r, { details: undefined, services: d.services || [], message: d.message || '', contact: d.contact || '', when: d.when || '', lat: d.lat ?? null, lng: d.lng ?? null }); }
 function leadEvent(env, leadId, kind, text, by) { return env.DB.prepare('INSERT INTO lead_events (id, lead_id, kind, text, by_user) VALUES (?, ?, ?, ?, ?)').bind(newId('lev'), leadId, kind, str(text, 1000), by || null); }
 /** Keep the board in step with quotes and jobs. */
 async function syncLeads(env) {
@@ -390,7 +392,8 @@ async function leadsApi(env, me, m, parts, url, body) {
   if (!parts[2] && m === 'GET') {
     const events = (await env.DB.prepare('SELECT v.*, u.name AS by_name FROM lead_events v LEFT JOIN user u ON u.id = v.by_user WHERE v.lead_id = ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT 100').bind(id).all()).results;
     const other = lead.customer_id ? (await env.DB.prepare("SELECT e.id, e.status, e.created_at, q.number AS quote_number, json_extract(q.calculation, '$.total') AS quote_total FROM enquiries e LEFT JOIN quotes q ON q.id = e.quote_id WHERE e.customer_id = ? AND e.id != ? AND e.archived_at IS NULL ORDER BY e.created_at DESC LIMIT 10").bind(lead.customer_id, id).all()).results : [];
-    return json({ lead: leadOut(await env.DB.prepare(LEAD_LIST + ' WHERE e.id = ?').bind(id).first()), events, other });
+    const photos = await Promise.all((await env.DB.prepare('SELECT * FROM photos WHERE enquiry_id = ? ORDER BY created_at').bind(id).all()).results.map((p) => photoOut(env, p)));
+    return json({ lead: leadOut(await env.DB.prepare(LEAD_LIST + ' WHERE e.id = ?').bind(id).first()), events, other, photos });
   }
   if (!parts[2] && m === 'PUT') {
     const o = leadFields(body, lead), stmts = [];
@@ -453,13 +456,43 @@ async function publicEnquiry(request, env, body) {
   const name = str(body.name, 120), phone = str(body.phone, 40), email = str(body.email, 160);
   if (!name || (!phone && !email)) fail(400, 'Please add your name and a phone number or email.');
   const services = Array.isArray(body.services) ? body.services.map((x) => str(x, 40)).slice(0, 8) : [];
-  const lid = newId('enq');
+  const lid = newId('enq'), contact = ['Call', 'Text', 'Email'].indexOf(body.contact) >= 0 ? body.contact : '', when = str(body.when, 40);
+  const lat = numOrNull(body.lat), lng = numOrNull(body.lng), today = new Date(Date.now() + 10 * 3600000).toISOString().slice(0, 10);
+  const details = { services, message: str(body.message, 2000), contact, when };
+  if (lat != null && lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) { details.lat = lat; details.lng = lng; }
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, stage_at, updated_at, sort) VALUES (?, ?, ?, ?, ?, ?, ?, 'New enquiry', 'Website', datetime('now'), datetime('now'), -1)")
-      .bind(lid, name, email, phone, str(body.address, 200), str(body.suburb, 80), JSON.stringify({ services, message: str(body.message, 2000) })),
-    leadEvent(env, lid, 'created', 'Enquiry from the website', null),
+    env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, next_at, next_note, stage_at, updated_at, sort) VALUES (?, ?, ?, ?, ?, ?, ?, 'New enquiry', 'Website', ?, ?, datetime('now'), datetime('now'), -1)")
+      .bind(lid, name, email, phone, str(body.address, 200), str(body.suburb, 80), JSON.stringify(details), today, 'New website enquiry' + (contact ? ' — prefers ' + contact.toLowerCase() : '') + (when ? ' (' + when.toLowerCase() + ')' : '')),
+    leadEvent(env, lid, 'created', 'Enquiry from the website' + (contact ? ' — prefers ' + contact.toLowerCase() + (when ? ', ' + when.toLowerCase() : '') : ''), null),
     env.DB.prepare('INSERT INTO request_limits (key, count, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET count = excluded.count, expires = excluded.expires').bind(key, count + 1, row && row.expires > now ? row.expires : now + 3600000)]);
+  return json({ ok: true, id: lid, token: await photoToken(env, 'enq:' + lid) });
+}
+/** Up to 3 photos with a website enquiry (within an hour of sending it), so the job can often be quoted without a visit. */
+async function publicEnquiryPhoto(request, env, lid, t) {
+  if (!env.PHOTOS) fail(500, 'Photo storage is not connected.');
+  const want = await photoToken(env, 'enq:' + lid);
+  if (!t || t !== want) fail(403, 'That upload link is not valid.');
+  const e = await env.DB.prepare("SELECT id, created_at FROM enquiries WHERE id = ? AND created_at >= datetime('now', '-1 hour')").bind(lid).first();
+  if (!e) fail(410, 'That enquiry can no longer take photos — please text them to us instead.');
+  const n = (await env.DB.prepare("SELECT count(*) AS n FROM photos WHERE enquiry_id = ?").bind(lid).first()).n;
+  if (n >= 3) fail(429, 'Three photos is plenty — thanks!');
+  const type = (request.headers.get('Content-Type') || '').split(';')[0];
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(type)) fail(400, 'That file is not a photo.');
+  const buf = await request.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 8 * 1024 * 1024) fail(413, 'That photo is too big (8 MB at most).');
+  const pid = newId('pho'), key = 'enquiries/' + lid + '/' + pid + (type === 'image/png' ? '.png' : type === 'image/webp' ? '.webp' : '.jpg');
+  await env.PHOTOS.put(key, buf, { httpMetadata: { contentType: type } });
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO photos (id, enquiry_id, category, object_key, caption, file_name, content_type, bytes) VALUES (?, ?, 'enquiry', ?, '', 'photo', ?, ?)").bind(pid, lid, key, type, buf.byteLength),
+    leadEvent(env, lid, 'photo', 'Customer added a photo', null)]);
   return json({ ok: true });
+}
+/** What the public website shows: business details and the services offered (no prices). */
+async function publicBusiness(env) {
+  const b = await business(env), r = await activeRates(env), pub = {};
+  ['name', 'tradingName', 'phone', 'email', 'abn', 'address', 'website'].forEach((k) => { if (b[k]) pub[k] = b[k]; });
+  pub.services = (r.services || []).filter((x) => x.active !== false).map((x) => ({ id: x.id, name: x.name, description: x.description || '', category: x.category || 'Other' }));
+  return new Response(JSON.stringify(pub), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' } });
 }
 
 // ---------------- customers, properties, drawings ----------------
@@ -911,7 +944,9 @@ async function quoteFromRef(env, ref) {
   return q;
 }
 async function publicApi(request, env, parts, url, m, body) {
+  if (parts[1] === 'enquiry' && parts[2] && parts[3] === 'photo' && m === 'POST') return publicEnquiryPhoto(request, env, parts[2], url.searchParams.get('t'));
   if (parts[1] === 'enquiry' && m === 'POST') return publicEnquiry(request, env, body);
+  if (parts[1] === 'business' && m === 'GET') return publicBusiness(env);
   if (parts[1] !== 'quote') fail(404, 'Not found.');
   if (!parts[2] && m === 'GET') {
     const q = await quoteFromRef(env, url.searchParams.get('ref'));

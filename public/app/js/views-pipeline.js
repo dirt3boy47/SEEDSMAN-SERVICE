@@ -28,6 +28,7 @@
       return App.get('leads').then(function (d) {
         if (!el.isConnected) return;
         S.leads = d.leads; S.stages = d.stages; S.sources = d.sources; S.lostReasons = d.lostReasons; S.stats = d.stats;
+        if (App.badge) App.badge('pipeline', d.leads.filter(function (l) { return l.status === 'New enquiry'; }).length);
         render();
         if (ctx.query.lead) { var l = byId(ctx.query.lead); ctx.query.lead = null; if (l) sheet(l); }
       }).catch(function (e) { App.toast(e.message, 'err'); });
@@ -51,6 +52,8 @@
           (l.quote_number ? '<span class="tag">' + esc(l.quote_number) + (l.quote_status && l.status === 'Quoted' ? ' · ' + esc(l.quote_status) : '') + '</span>' : '') +
           (l.status === 'Scheduled' && l.job_start ? '<span class="tag info">' + new Date(l.job_start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + '</span>' : '') +
           (l.status === 'Lost' && l.lost_reason ? '<span class="tag">' + esc(l.lost_reason) + '</span>' : '') +
+          (+l.photo_count ? '<span class="pc-src">📷 ' + l.photo_count + '</span>' : '') +
+          (l.contact && l.status === 'New enquiry' ? '<span class="pc-src">prefers ' + esc(l.contact.toLowerCase()) + '</span>' : '') +
           (l.source && l.source !== 'Phone' ? '<span class="pc-src">' + esc(l.source) + '</span>' : '') +
           '<span class="pc-age" title="Days in this stage">' + (age ? age + 'd' : 'new') + '</span></div></div>';
     }
@@ -207,6 +210,9 @@
         var m = App.modal('<div class="ls-head"><span class="ls-dot" style="background:' + COLORS[l.status] + '"></span><div class="grow"><h2>' + esc(l.name) + '</h2><p class="sub">' + esc(l.status) + ' · ' + esc(l.source) + ' · added ' + App.ago(l.created_at.replace(' ', 'T') + 'Z') + (valueOf(l) ? ' · <b>' + money(valueOf(l), 0) + '</b>' : '') + '</p></div></div>' +
           '<div class="ls-contact">' + (tel ? '<a class="btn" href="tel:' + esc(tel) + '" data-log="call">' + icon('phone') + 'Call</a><a class="btn" href="sms:' + esc(tel) + '" data-log="sms">' + icon('mail') + 'Text</a>' : '') +
             (l.email ? '<a class="btn" href="mailto:' + esc(l.email) + '" data-log="email">' + icon('mail') + 'Email</a>' : '') + (mapq ? '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + mapq + '">' + icon('gps') + 'Directions</a>' : '') + '</div>' +
+          (l.contact || l.when ? '<p class="ls-pref">Prefers ' + esc([l.contact ? l.contact.toLowerCase() : '', l.when ? l.when.toLowerCase() : ''].filter(Boolean).join(' · ')) + '</p>' : '') +
+          (l.message && l.source === 'Website' ? '<blockquote class="ls-msg">' + esc(l.message) + '</blockquote>' : '') +
+          ((d.photos || []).length ? '<div class="ls-photos">' + d.photos.map(function (p) { return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" style="background-image:url(\'' + esc(p.url) + '\')" aria-label="Photo from the customer"></a>'; }).join('') + '</div>' : '') +
           '<button class="btn primary block ls-next" data-next="' + next[0] + '">' + icon(next[2] === 'refresh' ? 'chev' : next[2]) + esc(next[1]) + '</button>' +
           '<div class="field" style="margin-top:14px">Move to</div><div class="ls-stages">' + S.stages.map(function (s) { return '<button type="button" class="' + (s === l.status ? 'on' : '') + '" data-st="' + esc(s) + '" style="--c:' + COLORS[s] + '"><i></i>' + esc(s) + '</button>'; }).join('') + '</div>' +
           '<div class="field" style="margin-top:14px">Follow up</div><div class="ls-follow"><input type="date" id="l-next" class="input" value="' + esc(l.next_at || '') + '"><input id="l-nnote" class="input" placeholder="What to do (e.g. Call back)" value="' + esc(l.next_note || '') + '"></div>' +

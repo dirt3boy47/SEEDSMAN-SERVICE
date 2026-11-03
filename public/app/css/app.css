@@ -858,3 +858,10 @@ body.pdragging .pipe { scroll-snap-type: none; }
 }
 .pipe-bar > *, .pipe-wrap > * { min-width: 0; max-width: 100%; }
 .pipe-jump { width: 100%; }
+/* website enquiries in the card sheet; count badges on the phone tab bar */
+.ls-pref { margin: -4px 0 8px; color: var(--info); font-weight: 650; font-size: 13.5px; }
+.ls-msg { margin: 0 0 10px; padding: 10px 12px; border-left: 3px solid var(--info); background: var(--info-soft); border-radius: 0 10px 10px 0; font-size: 14px; white-space: pre-wrap; }
+.ls-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 12px; }
+.ls-photos a { aspect-ratio: 1; border-radius: 12px; background: var(--chip) center / cover; }
+#tabbar a { position: relative; }
+#tabbar .count { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--signal); color: #fff; font-size: 11px; font-weight: 750; line-height: 18px; text-align: center; }

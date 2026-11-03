@@ -158,6 +158,12 @@
       '<button type="button" data-more>' + icon('more') + '<span>More</span></button>';
     tabs.querySelector('[data-more]').onclick = function () { document.body.classList.add('nav-open'); document.getElementById('scrim').hidden = false; };
   }
+  function badge(nav, n) {
+    document.querySelectorAll('[data-nav="' + nav + '"]').forEach(function (a) {
+      var c = a.querySelector('.count'); if (!n) { if (c) c.remove(); return; }
+      if (!c) { c = document.createElement('span'); c.className = 'count'; a.appendChild(c); } c.textContent = n > 99 ? '99+' : n;
+    });
+  }
   function setTop(o) {
     o = o || {};
     if (o.el && !o.el.isConnected) return null; // a late reply for a page you already left
@@ -203,7 +209,7 @@
   function start() {
     applyTheme(theme());
     if (!token()) { goLogin(); return; }
-    me().then(function (d) { if (window.GIS) GIS.configure((d.business || {}).imagery); shell(d); window.addEventListener('hashchange', render); render(); })
+    me().then(function (d) { if (window.GIS) GIS.configure((d.business || {}).imagery); shell(d); badge('pipeline', (d.counts || {}).newLeads || 0); window.addEventListener('hashchange', render); render(); })
       .catch(function (e) { toast(e.message, 'err', 8000); });
   }
 
@@ -211,6 +217,6 @@
     get: function (p) { return call('GET', p); }, post: function (p, b) { return call('POST', p, b || {}); }, put: function (p, b) { return call('PUT', p, b || {}); }, del: function (p) { return call('DELETE', p); },
     setToken: setToken, token: token, me: me, refreshMe: refreshMe, icon: icon, cat: cat, CATS: CATS,
     esc: esc, money: money, money0: money0, qty: qty, pct: pct, date: date, dateShort: dateShort, ago: ago, time: time, pill: pill, initials: initials, addr: addr, parseDate: parseDate,
-    toast: toast, modal: modal, confirm: confirmBox, menu: menu, closeMenu: closeMenu, setTop: setTop, route: route, go: go, start: start, isDark: isDark
+    toast: toast, badge: badge, modal: modal, confirm: confirmBox, menu: menu, closeMenu: closeMenu, setTop: setTop, route: route, go: go, start: start, isDark: isDark
   };
 })();
