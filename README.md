@@ -138,6 +138,6 @@ Passwords are salted PBKDF2 hashes and sessions are stored as token hashes; 10 w
 npx wrangler d1 execute seedsmans --local --file schema/existing.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0004_property_location.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0005_site_drawings.sql
-# …and each later migration in order (0006 – 0010)
+# …and each later migration in order (0006 – 0011)
 npx wrangler dev
 ```

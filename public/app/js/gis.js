@@ -430,10 +430,22 @@
     return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
   }
   /** One-way driving distance and time from the app's router (Google traffic or OSRM roads, see worker routeApi). */
+  /** Drive times for many legs: sent in batches of 10 (the server stays under Cloudflare's per-request limit), answers
+      joined back in order. Says once per session if Google drive times aren't working, rather than failing silently. */
+  var warnedGoogle = false;
+  function routes(legs, geometry) {
+    var chunks = [];
+    for (var i = 0; i < legs.length; i += 10) chunks.push(legs.slice(i, i + 10));
+    return Promise.all(chunks.map(function (c) { return App.post('route', { geometry: !!geometry, legs: c }); })).then(function (rs) {
+      var bad = rs.filter(function (r) { return r.google && !r.google.ok; })[0];
+      if (bad && !warnedGoogle) { warnedGoogle = true; App.toast('Google drive times aren’t working right now (' + (bad.google.error || 'no answer') + ') — using road estimates instead. Settings › Test Google keys shows more.', 'warn', 9000); }
+      return { legs: [].concat.apply([], rs.map(function (r) { return r.legs || []; })) };
+    });
+  }
   function drive(a, b, depart) {
     var est = function () { var km = straightKm(a, b) * 1.35; return { km: km, min: km / 50 * 60, road: false }; };
     if (!window.App || !App.token()) return Promise.resolve(est());
-    return App.post('route', { legs: [{ from: a, to: b, depart: depart || null }] }).then(function (d) {
+    return routes([{ from: a, to: b, depart: depart || null }]).then(function (d) {
       var l = d.legs && d.legs[0]; if (!l) return est();
       return { km: l.km, min: l.min, low: l.low, high: l.high, road: l.source !== 'estimate', source: l.source };
     }).catch(est);
@@ -479,5 +491,5 @@
     input.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
   }
 
-  window.GIS = { isPt: isPt, configure: configure, suggest: suggest, drive: drive, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
+  window.GIS = { isPt: isPt, configure: configure, suggest: suggest, drive: drive, routes: routes, straightKm: straightKm, addressInput: addressInput, create: create, toLatLngs: toLatLngs, toGeo: toGeo, modeOf: modeOf, measureOf: measureOf, fmtLen: fmtLen, fmtArea: fmtArea, search: search, START: START };
 })();

@@ -71,7 +71,7 @@
         });
       });
       if (!legs.length) return Promise.resolve();
-      return App.post('route', { legs: legs }).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); }).catch(function () { /* estimates are used */ });
+      return GIS.routes(legs).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); }).catch(function () { /* estimates are used */ });
     }
     function travel(a, b, date, departMin) {
       var st = settings();
@@ -262,7 +262,7 @@
         if (last.lat != null) { var k2 = roadKey(last, dp, last.date, last.endMin); if (!S.road[k2] && keys.indexOf(k2) < 0) { keys.push(k2); legs.push({ from: { lat: last.lat, lng: last.lng }, to: { lat: dp.lat, lng: dp.lng }, depart: local(last.date, Math.min(1439, last.endMin)) }); } }
       });
       if (!legs.length) return;
-      App.post('route', { legs: legs }).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); if (el.isConnected) renderCal(); }).catch(function () { /* estimates stay */ });
+      GIS.routes(legs).then(function (d) { (d.legs || []).forEach(function (l, i) { if (l) S.road[keys[i]] = l; }); if (el.isConnected) renderCal(); }).catch(function () { /* estimates stay */ });
     }
 
     function renderCal() {
@@ -581,7 +581,7 @@
       });
       setTimeout(function () { gis.map.invalidateSize(); if (bounds.length > 1) gis.map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40] }); else if (bounds.length) gis.map.setView(bounds[0], 15); }, 60);
       var plain = function (l) { return { lat: +l.lat, lng: +l.lng }; };
-      App.post('route', { geometry: true, legs: legs.map(function (l) { return { from: plain(l.from), to: plain(l.to), depart: l.depart }; }) }).then(function (d) {
+      GIS.routes(legs.map(function (l) { return { from: plain(l.from), to: plain(l.to), depart: l.depart }; }), true).then(function (d) {
         var res = d.legs || [];
         res.forEach(function (r, i) {
           if (!r) return; var mm = meta[i], col = colors[Object.keys(byCrew).indexOf(mm.crew) % 3];

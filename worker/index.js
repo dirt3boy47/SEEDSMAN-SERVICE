@@ -949,7 +949,6 @@ async function publicApi(request, env, parts, url, m, body) {
 // Open-source OSRM (OpenStreetMap roads) by default; with a Google Maps key (Settings), Google's traffic predictions for
 // the departure time give the time and an optimistic–pessimistic range. Straight-line estimate if neither answers.
 const OSRM_DEFAULT = 'https://router.project-osrm.org';
-const GOOGLE_DM_DEFAULT = 'https://maps.googleapis.com/maps/api/distancematrix/json';
 function straightKmW(a, b) {
   const D = Math.PI / 180, dLat = (b.lat - a.lat) * D, dLng = (b.lng - a.lng) * D;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D) * Math.cos(b.lat * D) * Math.sin(dLng / 2) ** 2;
@@ -981,57 +980,66 @@ async function osrmLeg(env, a, b, withGeometry) {
 }
 const GOOGLE_ROUTES_DEFAULT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 /** Google Routes API (computeRoutes, traffic-aware): best guess plus optimistic and pessimistic durations. */
+/** One Google Routes call per drive: the traffic-aware time for the departure, with the no-traffic time giving the range. */
 async function googleRoutesLeg(env, key, a, b, dep) {
-  const url = env.GOOGLE_ROUTES_URL || GOOGLE_ROUTES_DEFAULT;
-  const one = async (model) => {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters' },
-      body: JSON.stringify({ origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } }, destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
-        travelMode: 'DRIVE', routingPreference: 'TRAFFIC_AWARE_OPTIMAL', departureTime: new Date(dep * 1000).toISOString(), trafficModel: model, regionCode: 'AU', units: 'METRIC' }) });
-    const d = await r.json().catch(() => ({}));
-    const rt = d.routes && d.routes[0];
-    if (!r.ok || !rt || !rt.duration) throw new Error('google routes ' + ((d.error && d.error.message) || r.status));
-    return { km: (rt.distanceMeters || 0) / 1000, min: parseFloat(rt.duration) / 60 };
-  };
-  const [best, low, high] = await Promise.all([one('BEST_GUESS'), one('OPTIMISTIC'), one('PESSIMISTIC')]);
-  return { km: best.km, min: best.min, low: low.min, high: high.min };
+  const r = await fetch(env.GOOGLE_ROUTES_URL || GOOGLE_ROUTES_DEFAULT, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'routes.duration,routes.staticDuration,routes.distanceMeters' },
+    body: JSON.stringify({ origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } }, destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
+      travelMode: 'DRIVE', routingPreference: 'TRAFFIC_AWARE_OPTIMAL', departureTime: new Date(dep * 1000).toISOString(), trafficModel: 'BEST_GUESS', regionCode: 'AU', units: 'METRIC' }) });
+  const d = await r.json().catch(() => ({}));
+  const rt = d.routes && d.routes[0];
+  if (!r.ok || !rt || !rt.duration) throw new Error((d.error && (d.error.message || d.error.status)) || ('Google answered ' + r.status));
+  const min = parseFloat(rt.duration) / 60, free = rt.staticDuration ? parseFloat(rt.staticDuration) / 60 : min;
+  return { km: (rt.distanceMeters || 0) / 1000, min, low: Math.min(free, min), high: min + Math.max(min - free, min * 0.1) };
 }
-async function googleLeg(env, key, a, b, departUnix) {
-  const base = env.GOOGLE_DM_URL || GOOGLE_DM_DEFAULT, now = Math.floor(Date.now() / 1000);
-  let dep = departUnix || now;
+function googleLeg(env, key, a, b, departUnix) {
+  const now = Math.floor(Date.now() / 1000);
+  let dep = departUnix || now + 120;
   while (dep < now + 60) dep += 7 * 86400; // past times: the same weekday and time next week
-  try { return await googleRoutesLeg(env, key, a, b, dep); } catch (e) { /* older Distance Matrix API below (projects that still have it) */ }
-  const one = async (model) => {
-    const u = base + '?origins=' + a.lat + ',' + a.lng + '&destinations=' + b.lat + ',' + b.lng + '&mode=driving&departure_time=' + dep + '&traffic_model=' + model + '&key=' + encodeURIComponent(key);
-    const d = await (await fetch(u)).json();
-    const el = d.rows && d.rows[0] && d.rows[0].elements && d.rows[0].elements[0];
-    if (d.status !== 'OK' || !el || el.status !== 'OK') throw new Error('google ' + (d.error_message || d.status || (el && el.status)));
-    return { km: el.distance.value / 1000, min: (el.duration_in_traffic || el.duration).value / 60 };
-  };
-  const [best, low, high] = await Promise.all([one('best_guess'), one('optimistic'), one('pessimistic')]);
-  return { km: best.km, min: best.min, low: low.min, high: high.min };
+  return googleRoutesLeg(env, key, a, b, dep);
 }
+/** Drive times for up to 30 legs. Google (when a key is saved) → road routing (OSRM) → straight-line estimate.
+    Results are cached for 30 days; outside calls are kept under Cloudflare's 50-per-request limit. */
 async function routeApi(env, body) {
   const b = await business(env), key = b.routing && b.routing.googleKey, tz = b.timezone || 'Australia/Melbourne';
   const legs = (Array.isArray(body.legs) ? body.legs : []).slice(0, 30);
   const ok = (p) => p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
-  const out = await Promise.all(legs.map(async (l) => {
+  let budget = 45; const spend = () => budget-- > 0;
+  const bucket = (dt) => { if (!dt) return 'any'; const d = new Date(dt + ':00Z'); return d.getUTCDay() + '-' + d.getUTCHours(); };
+  const prep = legs.map((l) => {
     if (!ok(l.from) || !ok(l.to)) return null;
     const a = { lat: +l.from.lat, lng: +l.from.lng }, c = { lat: +l.to.lat, lng: +l.to.lng }, depart = LOCAL_DT.test(l.depart || '') ? l.depart : null;
+    return { a, c, depart, k: [a.lat.toFixed(4), a.lng.toFixed(4), c.lat.toFixed(4), c.lng.toFixed(4), bucket(depart)].join(',') };
+  });
+  const keys = prep.filter(Boolean).map((p) => p.k), cache = {};
+  if (keys.length) (await env.DB.prepare("SELECT * FROM route_cache WHERE k IN (SELECT value FROM json_each(?)) AND created_at >= datetime('now', '-30 days')").bind(JSON.stringify(keys)).all()).results.forEach((r) => { cache[r.k] = r; });
+  const puts = []; let googleError = null;
+  const out = await Promise.all(prep.map(async (p) => {
+    if (!p) return null;
+    const { a, c, depart } = p;
     if (straightKmW(a, c) < 0.05) return { km: 0, min: 0, low: 0, high: 0, source: 'same' };
     let geometry = null;
-    if (body.geometry) { try { geometry = (await osrmLeg(env, a, c, true)).geometry; } catch (e) { geometry = null; } }
-    if (key) {
-      try { const g = await googleLeg(env, key, a, c, depart ? localToUnix(depart, tz) : null); return Object.assign(g, { source: 'google', geometry }); } catch (e) { /* fall through to OSRM */ }
+    if (body.geometry && spend()) { try { geometry = (await osrmLeg(env, a, c, true)).geometry; } catch (e) { geometry = null; } }
+    const hit = cache[p.k];
+    if (hit && (hit.source === 'google' || !key)) return { km: hit.km, min: hit.min, low: hit.low, high: hit.high, source: hit.source, cached: true, geometry };
+    if (key && spend()) {
+      try {
+        const g = await googleLeg(env, key, a, c, depart ? localToUnix(depart, tz) : null);
+        puts.push(env.DB.prepare('INSERT OR REPLACE INTO route_cache (k, km, min, low, high, source) VALUES (?, ?, ?, ?, ?, ?)').bind(p.k, g.km, g.min, g.low, g.high, 'google'));
+        return Object.assign(g, { source: 'google', geometry });
+      } catch (e) { googleError = googleError || String(e.message || e).slice(0, 200); }
     }
-    try {
-      const o = await osrmLeg(env, a, c, false), band = trafficBand(depart);
-      return { km: o.km, min: o.min * band[0], low: o.min, high: o.min * band[1], source: 'osrm', geometry };
-    } catch (e) {
-      const km = straightKmW(a, c) * 1.35, min = km / 50 * 60;
-      return { km, min, low: min * 0.85, high: min * 1.3, source: 'estimate', geometry };
+    if (spend()) {
+      try {
+        const o = await osrmLeg(env, a, c, false), band = trafficBand(depart), res = { km: o.km, min: o.min * band[0], low: o.min, high: o.min * band[1], source: 'osrm', geometry };
+        if (!key) puts.push(env.DB.prepare('INSERT OR REPLACE INTO route_cache (k, km, min, low, high, source) VALUES (?, ?, ?, ?, ?, ?)').bind(p.k, res.km, res.min, res.low, res.high, 'osrm'));
+        return res;
+      } catch (e) { /* estimate below */ }
     }
+    const km = straightKmW(a, c) * 1.35, min = km / 50 * 60;
+    return { km, min, low: min * 0.85, high: min * 1.3, source: 'estimate', geometry };
   }));
-  return json({ legs: out });
+  if (puts.length) await env.DB.batch(puts).catch(() => {});
+  return json({ legs: out, google: key ? { ok: !googleError, error: googleError } : null });
 }
 
 // ---------------- Google key check (Settings › Test Google keys) ----------------
