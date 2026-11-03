@@ -75,3 +75,21 @@ body.mapper { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 
 .mapper .leaflet-control-attribution { max-width: 220px; font-size: 10px; line-height: 1.35; background: rgba(243, 239, 228, .85); }
 .mapper .leaflet-control-attribution .g-logo { font-family: Arial, sans-serif; font-weight: 700; color: #5f6368; letter-spacing: -.02em; }
+/* what to draw: hedges (lines), lawns (areas), trees (points) */
+.mmodes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+.mmodes button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 76px; padding: 8px 6px; border: 1px solid var(--line); background: transparent; font: 500 12px/1.25 var(--sans); color: var(--ink); cursor: pointer; text-align: center; }
+.mmodes button.on { border-color: var(--green); background: var(--green); color: var(--white); }
+.mmodes i, .mletter.mi-hedge, .mletter.mi-lawn, .mletter.mi-trees { display: inline-block; flex: none; }
+.mmodes i { width: 34px; height: 16px; }
+.mi-hedge { background: linear-gradient(currentColor, currentColor) center / 100% 3px no-repeat; }
+.mmodes .mi-hedge { background: none; border-bottom: 3px solid currentColor; border-radius: 0 0 2px 2px; height: 10px; }
+.mmodes .mi-lawn { border: 2px solid currentColor; height: 16px; width: 26px; background: rgba(213, 200, 173, .35); }
+.mmodes .mi-trees { width: 30px; background: radial-gradient(circle, currentColor 0 4px, transparent 5px) 0 0 / 15px 16px repeat-x; }
+.mletter.mi-hedge, .mletter.mi-lawn, .mletter.mi-trees { width: 30px; height: 30px; background: var(--green); position: relative; }
+.mletter.mi-hedge::after { content: ''; position: absolute; left: 7px; right: 7px; top: 14px; height: 2px; background: var(--white); }
+.mletter.mi-lawn::after { content: ''; position: absolute; inset: 8px; border: 1.5px solid var(--white); }
+.mletter.mi-trees::after { content: ''; position: absolute; left: 10px; top: 10px; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--white); }
+.mhow { color: var(--green); font-size: 14px; margin-bottom: 14px; }
+.mtotals { display: flex; gap: 22px; margin-top: 16px; flex-wrap: wrap; }
+.mtotals p { display: grid; gap: 2px; font: 500 10.5px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--sage); }
+.mtotals b { font: 400 28px/1 var(--serif); letter-spacing: .03em; color: var(--green); }

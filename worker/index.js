@@ -437,7 +437,14 @@ async function leadsApi(env, me, m, parts, url, body) {
       const same = await env.DB.prepare('SELECT id FROM properties WHERE customer_id = ? AND deleted_at IS NULL AND lower(address) = lower(?)').bind(cid, lead.address).first();
       pid = same ? same.id : await createProperty(env, me, cid, { address: lead.address, suburb: lead.suburb || '', access: '', hazards: '', lat: d.lat ?? null, lng: d.lng ?? null, zoom: null });
     }
-    await env.DB.batch([env.DB.prepare("UPDATE enquiries SET customer_id = ?, property_id = ?, updated_at = datetime('now') WHERE id = ?").bind(cid, pid, id), leadEvent(env, id, 'linked', 'Customer and property set up for the quote', me.id)]);
+    const stmts = [env.DB.prepare("UPDATE enquiries SET customer_id = ?, property_id = ?, updated_at = datetime('now') WHERE id = ?").bind(cid, pid, id), leadEvent(env, id, 'linked', 'Customer and property set up for the quote', me.id)];
+    if (Array.isArray(d.shapes) && d.shapes.length && !d.shapesSaved) { // the customer's hedges, lawns and trees become saved drawings on the property
+      stmts.push(...enquiryDrawings(env, me, pid, d.shapes));
+      d.shapesSaved = true;
+      stmts.push(env.DB.prepare('UPDATE enquiries SET details = ? WHERE id = ?').bind(JSON.stringify(d), id));
+      stmts.push(leadEvent(env, id, 'linked', d.shapes.length + ' shape' + (d.shapes.length === 1 ? '' : 's') + ' from the website saved on the property', me.id));
+    }
+    await env.DB.batch(stmts);
     return json({ customer_id: cid, property_id: pid });
   }
   if (!parts[2] && m === 'DELETE') {
@@ -460,12 +467,47 @@ async function publicEnquiry(request, env, body) {
   const lat = numOrNull(body.lat), lng = numOrNull(body.lng), today = new Date(Date.now() + 10 * 3600000).toISOString().slice(0, 10);
   const details = { services, message: str(body.message, 2000), contact, when };
   if (lat != null && lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) { details.lat = lat; details.lng = lng; }
+  const shapes = enquiryShapes(body.shapes); if (shapes.length) details.shapes = shapes;
   await env.DB.batch([
     env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, next_at, next_note, stage_at, updated_at, sort) VALUES (?, ?, ?, ?, ?, ?, ?, 'New enquiry', 'Website', ?, ?, datetime('now'), datetime('now'), -1)")
       .bind(lid, name, email, phone, str(body.address, 200), str(body.suburb, 80), JSON.stringify(details), today, 'New website enquiry' + (contact ? ' — prefers ' + contact.toLowerCase() : '') + (when ? ' (' + when.toLowerCase() + ')' : '')),
     leadEvent(env, lid, 'created', 'Enquiry from the website' + (contact ? ' — prefers ' + contact.toLowerCase() + (when ? ', ' + when.toLowerCase() : '') : ''), null),
     env.DB.prepare('INSERT INTO request_limits (key, count, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET count = excluded.count, expires = excluded.expires').bind(key, count + 1, row && row.expires > now ? row.expires : now + 3600000)]);
   return json({ ok: true, id: lid, token: await photoToken(env, 'enq:' + lid) });
+}
+/** Shapes drawn on the website's Map your property: hedges (lines), lawns (areas) and trees (points), kept with the
+    enquiry so starting the quote can put them on the property as saved drawings. */
+const ENQ_SERVICES = { hedge: 'hedge', lawn: 'lawn', trees: 'pruning' };
+function enquiryShapes(list) {
+  if (!Array.isArray(list)) return [];
+  const okPt = (c) => Array.isArray(c) && c.length === 2 && Math.abs(+c[0]) <= 180 && Math.abs(+c[1]) <= 90;
+  return list.slice(0, 30).map((x) => {
+    if (!x || !ENQ_SERVICES[x.type]) return null;
+    const g = cleanGeometry(x.geometry);
+    if (!g || g.coordinates.length > 500) return null;
+    const pts = g.type === 'Polygon' ? g.coordinates[0] : g.type === 'Point' ? [g.coordinates] : g.coordinates;
+    if (!pts.every(okPt)) return null;
+    const want = { hedge: 'LineString', lawn: 'Polygon', trees: 'MultiPoint' }[x.type];
+    if (g.type !== want) return null;
+    return { type: x.type, name: str(x.name, 80), geometry: g, length: numOrNull(x.length), area: numOrNull(x.area), count: g.type === 'MultiPoint' ? g.coordinates.length : null,
+      height: str(x.height, 30), sides: Array.isArray(x.sides) ? x.sides.map((v) => str(v, 20)).slice(0, 4) : [], cond: str(x.cond, 30), size: str(x.size, 30) };
+  }).filter(Boolean);
+}
+/** The customer's shapes as site drawings on the property, priced like any other measured item in the quote. */
+function enquiryDrawings(env, me, pid, shapes) {
+  const H = { 'Under 1.5 m': 1.2, '1.5 – 2.5 m': 2, '2.5 – 4 m': 3.2, 'Over 4 m': 4.5 }, C = { 'Kept regularly': 'maintained', Overgrown: 'overgrown', 'Needs reducing': 'reduction' };
+  return shapes.map((x, i) => {
+    let inputs, measure, name = x.name;
+    if (x.type === 'hedge') {
+      const sd = x.sides || [];
+      inputs = { length: Math.round((x.length || 0) * 10) / 10, height: H[x.height] || 1.8, depth: 0.8, condition: C[x.cond] || 'maintained',
+        faces: { top: sd.indexOf('Top') >= 0, front: sd.indexOf('Street side') >= 0, back: sd.indexOf('Garden side') >= 0, lhs: sd.indexOf('Ends') >= 0, rhs: sd.indexOf('Ends') >= 0 } };
+      measure = { length: inputs.length }; name = name || 'Hedge ' + (i + 1);
+    } else if (x.type === 'lawn') { inputs = { qty: Math.round((x.area || 0) * 10) / 10 }; measure = { area: inputs.qty }; name = name || 'Lawn'; }
+    else { inputs = { qty: x.count || 1 }; measure = { count: x.count || 1 }; name = (name || 'Trees') + (x.size ? ' — ' + x.size : ''); }
+    return env.DB.prepare('INSERT INTO site_drawings (id, property_id, name, kind, geometry, measure, service, inputs, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(newId('drw'), pid, name, kindOf(x.geometry), JSON.stringify(x.geometry), JSON.stringify(measure), ENQ_SERVICES[x.type], JSON.stringify(inputs), 'Drawn by the customer on the website', me.id);
+  });
 }
 /** Up to 3 photos with a website enquiry (within an hour of sending it), so the job can often be quoted without a visit. */
 async function publicEnquiryPhoto(request, env, lid, t) {
