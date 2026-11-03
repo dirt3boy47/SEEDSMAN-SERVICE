@@ -97,3 +97,5 @@ body.mapper { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 .mapper.drawing .leaflet-container, .mapper.drawing .leaflet-grab, .mapper.drawing .leaflet-interactive { cursor: default; }
 .mapper.drawing .leaflet-dragging .leaflet-grab, .mapper.drawing .leaflet-dragging .leaflet-container { cursor: grabbing; }
 .mapper.drawing .leaflet-marker-draggable { cursor: move; }
+/* crosshair while placing the pin and drawing (overrides the arrow) */
+.mapper.drawing .leaflet-container, .mapper.drawing .leaflet-grab, .mapper.drawing .leaflet-interactive { cursor: crosshair; }

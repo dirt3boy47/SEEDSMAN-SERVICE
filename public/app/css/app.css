@@ -865,3 +865,10 @@ body.pdragging .pipe { scroll-snap-type: none; }
 .ls-photos a { aspect-ratio: 1; border-radius: 12px; background: var(--chip) center / cover; }
 #tabbar a { position: relative; }
 #tabbar .count { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--signal); color: #fff; font-size: 11px; font-weight: 750; line-height: 18px; text-align: center; }
+/* the customer's drawing in a Pipeline card */
+.ls-map { height: 240px; margin: 2px 0 8px; border-radius: 14px; overflow: hidden; }
+.ls-map .gis { height: 100%; min-height: 0; border-radius: 14px; }
+.ls-shapes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ls-shape { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; background: var(--chip); font-size: 12.5px; }
+.ls-shape i { width: 9px; height: 9px; border-radius: 50%; background: #3ddc84; }
+.ls-shape.t-lawn i { background: #a9e34b; } .ls-shape.t-trees i { background: #74c0fc; }

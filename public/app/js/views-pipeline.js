@@ -166,7 +166,7 @@
       put().then(function () { App.toast(lead.name + ' → ' + stage); });
     }
     function startQuote(lead) {
-      App.post('leads/' + lead.id + '/convert', {}).then(function (r) { location.hash = '#/quotes/new?property=' + encodeURIComponent(r.property_id); })
+      App.post('leads/' + lead.id + '/convert', {}).then(function (r) { location.hash = '#/quotes/new?property=' + encodeURIComponent(r.property_id) + '&lead=' + encodeURIComponent(lead.id); })
         .catch(function (x) { App.toast(x.message, 'err', 6000); render(); sheet(lead); });
     }
     function lostSheet(lead, onPick, onCancel) {
@@ -212,6 +212,9 @@
             (l.email ? '<a class="btn" href="mailto:' + esc(l.email) + '" data-log="email">' + icon('mail') + 'Email</a>' : '') + (mapq ? '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + mapq + '">' + icon('gps') + 'Directions</a>' : '') + '</div>' +
           (l.contact || l.when ? '<p class="ls-pref">Prefers ' + esc([l.contact ? l.contact.toLowerCase() : '', l.when ? l.when.toLowerCase() : ''].filter(Boolean).join(' · ')) + '</p>' : '') +
           (l.message && l.source === 'Website' ? '<blockquote class="ls-msg">' + esc(l.message) + '</blockquote>' : '') +
+          ((l.shapes || []).length || l.lat != null ? '<div class="ls-map" id="ls-map"></div>' + ((l.shapes || []).length ? '<div class="ls-shapes">' + l.shapes.map(function (x) {
+            var sz = x.type === 'hedge' ? Math.round(x.length || 0) + ' m' + (x.height ? ' · ' + x.height : '') + (x.cond ? ' · ' + x.cond.toLowerCase() : '') : x.type === 'lawn' ? Math.round(x.area || 0) + ' m²' + (x.size ? ' · ' + x.size.toLowerCase() : '') : (x.count || (x.geometry.coordinates || []).length) + ' trees' + (x.size ? ' · ' + x.size.toLowerCase() : '');
+            return '<span class="ls-shape t-' + esc(x.type) + '"><i></i><b>' + esc(x.name || x.type) + '</b> ' + esc(sz) + '</span>'; }).join('') + '</div>' : '') : '') +
           ((d.photos || []).length ? '<div class="ls-photos">' + d.photos.map(function (p) { return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" style="background-image:url(\'' + esc(p.url) + '\')" aria-label="Photo from the customer"></a>'; }).join('') + '</div>' : '') +
           '<button class="btn primary block ls-next" data-next="' + next[0] + '">' + icon(next[2] === 'refresh' ? 'chev' : next[2]) + esc(next[1]) + '</button>' +
           '<div class="field" style="margin-top:14px">Move to</div><div class="ls-stages">' + S.stages.map(function (s) { return '<button type="button" class="' + (s === l.status ? 'on' : '') + '" data-st="' + esc(s) + '" style="--c:' + COLORS[s] + '"><i></i>' + esc(s) + '</button>'; }).join('') + '</div>' +
@@ -228,7 +231,16 @@
           '<div class="ls-events">' + d.events.map(function (v) { return '<div class="ls-ev k-' + esc(v.kind) + '"><span>' + esc(v.text) + '</span><small>' + App.ago(v.created_at.replace(' ', 'T') + 'Z') + (v.by_name ? ' · ' + esc(v.by_name) : '') + '</small></div>'; }).join('') + '</div>' +
           (d.other.length ? '<div class="field" style="margin-top:14px">Other jobs for this customer</div><div class="list">' + d.other.map(function (o) { return '<a class="li" href="#/pipeline?lead=' + esc(o.id) + '"><span class="grow"><b>' + esc(o.quote_number || 'Enquiry') + '</b><small>' + esc(o.status) + ' · ' + App.dateShort(o.created_at) + '</small></span>' + (o.quote_total ? '<b class="num">' + money(o.quote_total, 0) + '</b>' : '') + '</a>'; }).join('') + '</div>' : '') +
           '<div class="actions"><button class="btn ghost" id="l-del" style="color:var(--danger)">' + icon('trash') + 'Remove</button>' + (l.customer_id ? '<a class="btn" href="#/customers/' + esc(l.customer_id) + '">' + icon('users') + 'Customer</a>' : '') + '<span class="spacer"></span><button class="btn" data-close>Close</button><button class="btn primary" id="l-save">Save</button></div>',
-          { noFocus: true, onClose: function () { render(); } });
+          { noFocus: true, onClose: function () { if (lmap) lmap.destroy(); render(); } });
+        // the customer's drawing on satellite, so you can see the job before quoting it
+        var lmap = null, box = m.el.querySelector('#ls-map');
+        if (box && window.GIS) {
+          lmap = GIS.create(box, { toolbar: false });
+          var col = { hedge: App.cat('Hedges').map, lawn: App.cat('Lawns').map, trees: App.cat('Trees').map };
+          lmap.setShapes((l.shapes || []).map(function (x, i) { return { id: 'c' + i, geometry: x.geometry, color: col[x.type], label: x.name }; }));
+          if (l.lat != null) lmap.setPin([l.lat, l.lng]);
+          setTimeout(function () { lmap.invalidate(); setTimeout(function () { lmap.fit(); }, 60); }, 80);
+        }
         var $ = function (id) { return m.el.querySelector('#' + id); }, pin = {};
         if (window.GIS && GIS.addressInput) GIS.addressInput($('l-addr'), { onPick: function (p) { $('l-addr').value = p.address; $('l-sub').value = p.suburb || ''; pin = { lat: p.lat, lng: p.lng }; } });
         m.el.addEventListener('click', function (e) {

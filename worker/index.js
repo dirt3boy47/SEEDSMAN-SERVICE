@@ -317,7 +317,7 @@ const LEAD_LIST = "SELECT e.*, q.number AS quote_number, q.status AS quote_statu
   "(SELECT count(*) FROM lead_events v WHERE v.lead_id = e.id AND v.kind IN ('note','call','sms','email')) AS touches, " +
   "(SELECT count(*) FROM photos ph WHERE ph.enquiry_id = e.id) AS photo_count " +
   "FROM enquiries e LEFT JOIN quotes q ON q.id = e.quote_id";
-function leadOut(r) { const d = parseJson(r.details, {}); return Object.assign({}, r, { details: undefined, services: d.services || [], message: d.message || '', contact: d.contact || '', when: d.when || '', lat: d.lat ?? null, lng: d.lng ?? null }); }
+function leadOut(r) { const d = parseJson(r.details, {}); return Object.assign({}, r, { details: undefined, services: d.services || [], message: d.message || '', contact: d.contact || '', when: d.when || '', lat: d.lat ?? null, lng: d.lng ?? null, shapes: Array.isArray(d.shapes) ? d.shapes : [] }); }
 function leadEvent(env, leadId, kind, text, by) { return env.DB.prepare('INSERT INTO lead_events (id, lead_id, kind, text, by_user) VALUES (?, ?, ?, ?, ?)').bind(newId('lev'), leadId, kind, str(text, 1000), by || null); }
 /** Keep the board in step with quotes and jobs. */
 async function syncLeads(env) {
@@ -430,7 +430,11 @@ async function leadsApi(env, me, m, parts, url, body) {
     if (!cid) {
       const hit = (await env.DB.prepare('SELECT id, phone, email FROM customers WHERE deleted_at IS NULL').all()).results
         .find((c) => (digits.length >= 8 && (c.phone || '').replace(/\D/g, '') === digits) || (lead.email && (c.email || '').toLowerCase() === lead.email.toLowerCase()));
-      cid = hit ? hit.id : await createCustomer(env, me, { name: lead.name, email: lead.email || '', phone: lead.phone || '', source: SOURCES.indexOf(lead.source) >= 0 ? lead.source : 'Other', notes: '' });
+      // not the same phone or email, but a property already on file at this address: use it (and its customer), so a
+      // property never ends up in the system twice
+      const atAddr = !hit && lead.address ? await env.DB.prepare('SELECT id, customer_id FROM properties WHERE deleted_at IS NULL AND lower(trim(address)) = lower(trim(?)) AND (? = \'\' OR lower(trim(suburb)) = lower(trim(?))) ORDER BY created_at LIMIT 1').bind(lead.address, lead.suburb || '', lead.suburb || '').first() : null;
+      if (atAddr) { cid = atAddr.customer_id; if (!pid) pid = atAddr.id; }
+      else cid = hit ? hit.id : await createCustomer(env, me, { name: lead.name, email: lead.email || '', phone: lead.phone || '', source: SOURCES.indexOf(lead.source) >= 0 ? lead.source : 'Other', notes: '' });
     }
     if (!pid) {
       if (!lead.address) fail(400, 'Add the property address to the enquiry first.');

@@ -64,7 +64,14 @@
         onSearchPick: function (p) { if (!S.propertyId) { if (!S.property.address) S.property.address = p.address; if (!S.property.suburb) S.property.suburb = p.suburb; } setHouse(L.latLng(p.lat, p.lng)); dirty(); renderSheet(); }
       });
       if (quoteId) return App.get('quotes/' + encodeURIComponent(quoteId)).then(loadQuote);
-      if (ctx.query.property) return App.get('properties/' + encodeURIComponent(ctx.query.property)).then(function (d) { useCustomer(d.customer); useProperty(d.property, d.drawings); render(); gis.fit(); workOutTravel(true); });
+      if (ctx.query.property) return App.get('properties/' + encodeURIComponent(ctx.query.property)).then(function (d) {
+        useCustomer(d.customer); useProperty(d.property, d.drawings); render();
+        if (ctx.query.lead) { // from the Pipeline: what the customer drew on the website goes straight onto the quote
+          var mine = unusedDrawings().filter(function (x) { return /website/i.test(x.notes || ''); }).map(function (x) { return x.id; });
+          if (mine.length) addDrawings(mine);
+        }
+        gis.fit(); workOutTravel(true);
+      });
       if (ctx.query.customer) return pickCustomer(ctx.query.customer);
       var d = loadDraft();
       render();
@@ -153,7 +160,7 @@
         var c = calc().lines[S.items.indexOf(it)], s = svc(it);
         list.push({ id: it.id, geometry: it.geometry, color: App.cat(s.category).map, label: (it.name || s.name) + (c && c.qty ? ' · ' + App.qty(c.qty, c.unit) : '') });
       });
-      unusedDrawings().forEach(function (d) { list.unshift({ id: 'drw:' + d.id, geometry: d.geometry, color: '#cfd8d2', dashed: true, faded: true, label: '+ ' + d.name }); });
+      unusedDrawings().forEach(function (d) { var sv = d.service && P.serviceOf(rates, d.service); list.unshift({ id: 'drw:' + d.id, geometry: d.geometry, color: sv ? App.cat(sv.category).map : '#e9efe9', dashed: true, label: '+ ' + d.name + (/website/i.test(d.notes || '') ? ' (customer)' : '') }); });
       gis.setShapes(list);
     }
 
