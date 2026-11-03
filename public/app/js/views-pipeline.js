@@ -43,11 +43,34 @@
         actions: '<button class="btn primary" id="new-lead">' + icon('plus') + '<span class="lbl">Enquiry</span></button>' });
       document.getElementById('new-lead').onclick = function () { enquiryForm(); };
     }
+    /** A small sketch of what the customer drew on the website (hedges green lines, lawns areas, trees dots) and a summary. */
+    function sketch(l) {
+      var sh = l.shapes || []; if (!sh.length) return '';
+      var pts = []; sh.forEach(function (x) { var c = x.geometry.coordinates; (x.geometry.type === 'Polygon' ? c[0] : c).forEach(function (q) { pts.push(q); }); });
+      if (l.lat != null) pts.push([l.lng, l.lat]);
+      var k = Math.cos(pts[0][1] * Math.PI / 180), xs = pts.map(function (q) { return q[0] * k; }), ys = pts.map(function (q) { return q[1]; });
+      var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+      var W = 240, H = 84, pad = 10, sc = Math.min((W - 2 * pad) / ((x1 - x0) || 1e-6), (H - 2 * pad) / ((y1 - y0) || 1e-6));
+      var ox = (W - (x1 - x0) * sc) / 2, oy = (H - (y1 - y0) * sc) / 2;
+      var P = function (q) { return ((q[0] * k - x0) * sc + ox).toFixed(1) + ',' + ((y1 - q[1]) * sc + oy).toFixed(1); };
+      var g = sh.map(function (x) {
+        var c = x.geometry.coordinates;
+        if (x.type === 'lawn') return '<polygon points="' + c[0].map(P).join(' ') + '" fill="rgba(169,227,75,.28)" stroke="#a9e34b" stroke-width="1.5"/>';
+        if (x.type === 'hedge') return '<polyline points="' + c.map(P).join(' ') + '" fill="none" stroke="#3ddc84" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';
+        return c.map(function (q) { var xy = P(q).split(','); return '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="3.6" fill="#74c0fc" stroke="#fff" stroke-width="1"/>'; }).join('');
+      }).join('');
+      if (l.lat != null) { var hp = P([l.lng, l.lat]).split(','); g += '<circle cx="' + hp[0] + '" cy="' + hp[1] + '" r="4" fill="#e8590c" stroke="#fff" stroke-width="1.5"/>'; }
+      var hedges = sh.filter(function (x) { return x.type === 'hedge'; }), lawns = sh.filter(function (x) { return x.type === 'lawn'; }), trees = sh.filter(function (x) { return x.type === 'trees'; });
+      var lm = hedges.reduce(function (a, x) { return a + (+x.length || 0); }, 0), m2 = lawns.reduce(function (a, x) { return a + (+x.area || 0); }, 0), nt = trees.reduce(function (a, x) { return a + ((x.geometry.coordinates || []).length); }, 0);
+      var sum = [hedges.length ? hedges.length + ' hedge' + (hedges.length === 1 ? '' : 's') + ' · ' + Math.round(lm) + ' m' : '', lawns.length ? Math.round(m2) + ' m² lawn' : '', nt ? nt + ' tree' + (nt === 1 ? '' : 's') : ''].filter(Boolean).join(' · ');
+      return '<div class="pc-sketch" title="Drawn by the customer on the website"><svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' + g + '</svg></div><div class="pc-drawn">' + esc(sum) + '</div>';
+    }
     function card(l) {
       var v = valueOf(l), svc = servicesOf(l), age = daysSince(l.stage_at || l.created_at);
       return '<div class="pcard" data-id="' + esc(l.id) + '" style="--c:' + COLORS[l.status] + '">' +
         '<div class="pc-top"><b>' + esc(l.name) + '</b>' + (v ? '<span class="pc-val">' + money(v, 0) + '</span>' : '') + '</div>' +
         '<small>' + esc([l.suburb || l.address, svc].filter(Boolean).join(' · ') || 'No details yet') + '</small>' +
+        (l.status === 'New enquiry' || l.status === 'Contacted' || l.status === 'Site visit' ? sketch(l) : '') +
         '<div class="pc-meta">' + follow(l) +
           (l.quote_number ? '<span class="tag">' + esc(l.quote_number) + (l.quote_status && l.status === 'Quoted' ? ' · ' + esc(l.quote_status) : '') + '</span>' : '') +
           (l.status === 'Scheduled' && l.job_start ? '<span class="tag info">' + new Date(l.job_start.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + '</span>' : '') +
