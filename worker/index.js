@@ -142,6 +142,7 @@ async function api(request, env, url) {
     case 'dashboard': if (m === 'GET') return dashboard(env); break;
     case 'reports': if (m === 'GET') return parts[1] === 'manhours' ? manHoursReport(env) : reports(env, url); break;
     case 'customers': return customersApi(env, me, m, parts, url, body);
+    case 'leads': return leadsApi(env, me, m, parts, url, body);
     case 'properties': return propertiesApi(env, me, m, parts, url, body);
     case 'drawings': return drawingsApi(env, me, m, parts, body);
     case 'quotes': return quotesApi(env, me, m, parts, url, body);
@@ -265,7 +266,9 @@ async function dashboard(env) {
   const jobs = (await env.DB.prepare(JOB_LIST + " WHERE j.status IN ('Scheduled','In progress') AND substr(j.start, 1, 10) >= ? ORDER BY j.start LIMIT 6").bind(today).all()).results;
   const trims = (await env.DB.prepare(PLAN_LIST + " WHERE r.active = 1 AND r.status = 'Due' AND r.due <= date('now', '+30 days') ORDER BY r.due LIMIT 12").all()).results;
   const toClose = (await env.DB.prepare(JOB_LIST + " WHERE j.status IN ('Scheduled','In progress') AND j.end < strftime('%Y-%m-%dT%H:%M', 'now', '+10 hours') ORDER BY j.start DESC LIMIT 8").all()).results;
-  return json({ kpis: k, recent, follow, toSchedule, jobs, trims, toClose });
+  const followUps = (await env.DB.prepare("SELECT id, name, suburb, status, next_at, next_note, phone FROM enquiries WHERE archived_at IS NULL AND status NOT IN ('Done','Lost') AND next_at IS NOT NULL AND next_at <= ? ORDER BY next_at LIMIT 8").bind(today).all()).results;
+  const newLeads = (await env.DB.prepare("SELECT count(*) AS n FROM enquiries WHERE archived_at IS NULL AND status = 'New enquiry'").first()).n;
+  return json({ kpis: k, recent, follow, toSchedule, jobs, trims, toClose, followUps, newLeads });
 }
 
 async function reports(env, url) {
@@ -296,6 +299,167 @@ async function reports(env, url) {
     byStatus, services: Object.keys(byService).map((k2) => Object.assign({ name: k2 }, byService[k2])).sort((a, b) => b.quoted - a.quoted),
     suburbs: Object.keys(bySuburb).map((k2) => Object.assign({ name: k2 }, bySuburb[k2])).sort((a, b) => b.value - a.value).slice(0, 8)
   });
+}
+
+
+// ---------------- customer pipeline (CRM) ----------------
+// Each lead is a card that moves from the first enquiry to the finished job. People drag cards between stages; the
+// pipeline also moves cards forward by itself when the quote is accepted, the job is booked and the job is closed out.
+const STAGES = ['New enquiry', 'Contacted', 'Site visit', 'Quoted', 'Won', 'Scheduled', 'Done', 'Lost'];
+const LEAD_SOURCES = ['Phone', 'Website', 'Referral', 'Repeat customer', 'Facebook', 'Google', 'Sign or flyer', 'Walk-in', 'Other'];
+const LOST_REASONS = ['Price', 'Went with someone else', 'No response', 'Not a job for us', 'Timing', 'Other'];
+const stageRank = (st) => (st === 'Lost' ? -1 : STAGES.indexOf(st));
+const LEAD_LIST = "SELECT e.*, q.number AS quote_number, q.status AS quote_status, json_extract(q.calculation, '$.total') AS quote_total, " +
+  "(SELECT group_concat(DISTINCT json_extract(l.value, '$.serviceName')) FROM json_each(q.calculation, '$.lines') l) AS quote_services, " +
+  "(SELECT j.id FROM jobs j WHERE j.quote_id = e.quote_id AND j.status != 'Cancelled' ORDER BY j.part LIMIT 1) AS job_id, " +
+  "(SELECT min(j.start) FROM jobs j WHERE j.quote_id = e.quote_id AND j.status NOT IN ('Cancelled','Unscheduled')) AS job_start, " +
+  "(SELECT count(*) FROM lead_events v WHERE v.lead_id = e.id AND v.kind IN ('note','call','sms','email')) AS touches " +
+  "FROM enquiries e LEFT JOIN quotes q ON q.id = e.quote_id";
+function leadOut(r) { const d = parseJson(r.details, {}); return Object.assign({}, r, { details: undefined, services: d.services || [], message: d.message || '', lat: d.lat ?? null, lng: d.lng ?? null }); }
+function leadEvent(env, leadId, kind, text, by) { return env.DB.prepare('INSERT INTO lead_events (id, lead_id, kind, text, by_user) VALUES (?, ?, ?, ?, ?)').bind(newId('lev'), leadId, kind, str(text, 1000), by || null); }
+/** Keep the board in step with quotes and jobs. */
+async function syncLeads(env) {
+  // a quote made for a lead's property after the enquiry becomes that lead's quote
+  await env.DB.prepare("UPDATE enquiries SET quote_id = (SELECT q.id FROM quotes q WHERE q.property_id = enquiries.property_id AND q.created_at >= enquiries.created_at AND NOT EXISTS (SELECT 1 FROM enquiries e2 WHERE e2.quote_id = q.id) ORDER BY q.created_at LIMIT 1), updated_at = datetime('now') " +
+    "WHERE quote_id IS NULL AND property_id IS NOT NULL AND archived_at IS NULL AND status NOT IN ('Done','Lost')").run();
+  // every quote has a card, even when it didn't start as an enquiry
+  await env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, customer_id, property_id, quote_id, created_at, stage_at, updated_at, sort) " +
+    "SELECT 'enq_' || lower(hex(randomblob(10))), c.name, c.email, c.phone, p.address, p.suburb, '{}', 'Quoted', c.source, q.customer_id, q.property_id, q.id, q.created_at, q.created_at, datetime('now'), 0 " +
+    "FROM quotes q JOIN customers c ON c.id = q.customer_id JOIN properties p ON p.id = q.property_id WHERE NOT EXISTS (SELECT 1 FROM enquiries e WHERE e.quote_id = q.id)").run();
+  // move cards forward when something newer than their last move happened
+  const rows = (await env.DB.prepare("SELECT e.id, e.status, e.stage_at, q.status AS qs, q.created_at AS qc, q.updated_at AS qa, " +
+    "(SELECT min(j.created_at) FROM jobs j WHERE j.quote_id = e.quote_id AND j.status != 'Cancelled') AS ja, (SELECT max(c.created_at) FROM job_closeouts c WHERE c.quote_id = e.quote_id) AS da " +
+    "FROM enquiries e JOIN quotes q ON q.id = e.quote_id WHERE e.archived_at IS NULL AND e.status != 'Done'").all()).results;
+  const stmts = [];
+  for (const r of rows) {
+    const cands = [['Quoted', r.qc], r.qs === 'Accepted' ? ['Won', r.qa] : null, r.ja ? ['Scheduled', r.ja] : null, r.da ? ['Done', r.da] : null, r.qs === 'Declined' ? ['Lost', r.qa] : null].filter(Boolean);
+    let best = null;
+    cands.forEach((c) => { if ((!r.stage_at || c[1] >= r.stage_at) && (c[0] === 'Lost' ? stageRank(r.status) < stageRank('Won') && r.status !== 'Lost' : stageRank(c[0]) > stageRank(r.status)) && (!best || c[0] === 'Lost' || stageRank(c[0]) > stageRank(best))) best = c[0]; });
+    if (!best) continue;
+    stmts.push(env.DB.prepare("UPDATE enquiries SET status = ?, stage_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").bind(best, r.id));
+    stmts.push(leadEvent(env, r.id, 'stage', 'Moved to ' + best + ({ Quoted: ' — quote started', Won: ' — quote accepted', Scheduled: ' — job booked', Done: ' — job closed out', Lost: ' — quote declined' }[best] || ''), null));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+}
+function leadFields(b, prev) {
+  const o = {}, d = parseJson(prev && prev.details, {});
+  if (b.name != null) o.name = str(b.name, 120);
+  if (b.phone != null) o.phone = str(b.phone, 40);
+  if (b.email != null) o.email = str(b.email, 160);
+  if (b.address != null) o.address = str(b.address, 200);
+  if (b.suburb != null) o.suburb = str(b.suburb, 80);
+  if (b.source != null) o.source = LEAD_SOURCES.indexOf(b.source) >= 0 ? b.source : 'Other';
+  if (b.value !== undefined) o.value = numOrNull(b.value);
+  if (b.notes != null) o.notes = str(b.notes, 4000);
+  if (b.next_at !== undefined) o.next_at = /^\d{4}-\d{2}-\d{2}$/.test(b.next_at || '') ? b.next_at : null;
+  if (b.next_note != null) o.next_note = str(b.next_note, 300);
+  if (b.lost_reason !== undefined) o.lost_reason = b.lost_reason ? str(b.lost_reason, 80) : null;
+  if (b.sort != null && isFinite(+b.sort)) o.sort = +b.sort;
+  if (b.services != null || b.message != null || b.lat !== undefined) {
+    if (Array.isArray(b.services)) d.services = b.services.map((x) => str(x, 40)).slice(0, 10);
+    if (b.message != null) d.message = str(b.message, 4000);
+    if (b.lat !== undefined) { d.lat = numOrNull(b.lat); d.lng = numOrNull(b.lng); }
+    o.details = JSON.stringify(d);
+  }
+  return o;
+}
+async function leadsApi(env, me, m, parts, url, body) {
+  const id = parts[1];
+  if (!id && m === 'GET') {
+    await syncLeads(env);
+    const leads = (await env.DB.prepare(LEAD_LIST + " WHERE e.archived_at IS NULL AND (e.status NOT IN ('Done','Lost') OR e.stage_at >= datetime('now', '-45 days')) ORDER BY e.sort, e.created_at DESC").all()).results.map(leadOut);
+    const st = await env.DB.prepare("SELECT (SELECT count(*) FROM enquiries WHERE archived_at IS NULL AND status IN ('Won','Scheduled','Done') AND stage_at >= datetime('now','-90 days')) AS won90, " +
+      "(SELECT count(*) FROM enquiries WHERE archived_at IS NULL AND status = 'Lost' AND stage_at >= datetime('now','-90 days')) AS lost90, " +
+      "(SELECT count(*) FROM enquiries WHERE archived_at IS NULL AND created_at >= datetime('now','-30 days')) AS new30").first();
+    return json({ leads, stages: STAGES, sources: LEAD_SOURCES, lostReasons: LOST_REASONS, stats: st });
+  }
+  if (!id && m === 'POST') {
+    const o = leadFields(Object.assign({ source: 'Phone' }, body), null);
+    if (!o.name) fail(400, 'Type their name.');
+    if (!o.phone && !o.email) fail(400, 'Add a phone number or email so you can get back to them.');
+    const lid = newId('enq'), stage = STAGES.indexOf(body.stage) >= 0 && body.stage !== 'Lost' ? body.stage : 'New enquiry';
+    const minSort = await env.DB.prepare('SELECT min(sort) AS s FROM enquiries WHERE status = ? AND archived_at IS NULL').bind(stage).first();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, value, notes, next_at, next_note, stage_at, updated_at, sort, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?)")
+        .bind(lid, o.name, o.email || '', o.phone || '', o.address || '', o.suburb || '', o.details || '{}', stage, o.source, o.value ?? null, o.notes || '', o.next_at || null, o.next_note || '', ((minSort && minSort.s) || 0) - 1, me.id),
+      leadEvent(env, lid, 'created', 'Enquiry added (' + o.source + ')', me.id)]);
+    return json({ lead: leadOut(await env.DB.prepare(LEAD_LIST + ' WHERE e.id = ?').bind(lid).first()) });
+  }
+  const lead = await env.DB.prepare('SELECT * FROM enquiries WHERE id = ? AND archived_at IS NULL').bind(id).first();
+  if (!lead) fail(404, 'That enquiry was not found.');
+  if (!parts[2] && m === 'GET') {
+    const events = (await env.DB.prepare('SELECT v.*, u.name AS by_name FROM lead_events v LEFT JOIN user u ON u.id = v.by_user WHERE v.lead_id = ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT 100').bind(id).all()).results;
+    const other = lead.customer_id ? (await env.DB.prepare("SELECT e.id, e.status, e.created_at, q.number AS quote_number, json_extract(q.calculation, '$.total') AS quote_total FROM enquiries e LEFT JOIN quotes q ON q.id = e.quote_id WHERE e.customer_id = ? AND e.id != ? AND e.archived_at IS NULL ORDER BY e.created_at DESC LIMIT 10").bind(lead.customer_id, id).all()).results : [];
+    return json({ lead: leadOut(await env.DB.prepare(LEAD_LIST + ' WHERE e.id = ?').bind(id).first()), events, other });
+  }
+  if (!parts[2] && m === 'PUT') {
+    const o = leadFields(body, lead), stmts = [];
+    if (body.stage != null && STAGES.indexOf(body.stage) >= 0 && body.stage !== lead.status) {
+      o.status = body.stage; o.stage_at = 'now';
+      if (body.stage !== 'Lost') o.lost_reason = null;
+      stmts.push(leadEvent(env, id, 'stage', 'Moved from ' + lead.status + ' to ' + body.stage + (body.stage === 'Lost' && o.lost_reason ? ' — ' + o.lost_reason : ''), me.id));
+    }
+    if (o.next_at !== undefined && o.next_at !== lead.next_at && o.next_at) stmts.push(leadEvent(env, id, 'follow', 'Follow up ' + o.next_at + (o.next_note ? ' — ' + o.next_note : ''), me.id));
+    const keys = Object.keys(o);
+    if (keys.length) {
+      stmts.unshift(env.DB.prepare('UPDATE enquiries SET ' + keys.map((k) => k === 'stage_at' ? "stage_at = datetime('now')" : k + ' = ?').join(', ') + ", updated_at = datetime('now') WHERE id = ?")
+        .bind(...keys.filter((k) => k !== 'stage_at').map((k) => o[k]), id));
+      await env.DB.batch(stmts);
+    }
+    return json({ lead: leadOut(await env.DB.prepare(LEAD_LIST + ' WHERE e.id = ?').bind(id).first()) });
+  }
+  if (parts[2] === 'events' && m === 'POST') {
+    const kind = ['note', 'call', 'sms', 'email'].indexOf(body.kind) >= 0 ? body.kind : 'note';
+    const text = str(body.text, 1000) || { call: 'Phoned', sms: 'Sent a text', email: 'Sent an email' }[kind] || '';
+    if (!text) fail(400, 'Type a note.');
+    const stmts = [leadEvent(env, id, kind, text, me.id), env.DB.prepare("UPDATE enquiries SET updated_at = datetime('now') WHERE id = ?").bind(id)];
+    if (kind !== 'note' && lead.status === 'New enquiry') { // getting in touch moves a new enquiry on
+      stmts.push(env.DB.prepare("UPDATE enquiries SET status = 'Contacted', stage_at = datetime('now') WHERE id = ?").bind(id));
+      stmts.push(leadEvent(env, id, 'stage', 'Moved to Contacted', me.id));
+    }
+    await env.DB.batch(stmts);
+    return json({ ok: true });
+  }
+  if (parts[2] === 'convert' && m === 'POST') {
+    // the customer and property for the quote: an existing customer with the same phone or email, otherwise a new one
+    let cid = lead.customer_id, pid = lead.property_id;
+    const d = parseJson(lead.details, {}), digits = (lead.phone || '').replace(/\D/g, '');
+    if (!cid) {
+      const hit = (await env.DB.prepare('SELECT id, phone, email FROM customers WHERE deleted_at IS NULL').all()).results
+        .find((c) => (digits.length >= 8 && (c.phone || '').replace(/\D/g, '') === digits) || (lead.email && (c.email || '').toLowerCase() === lead.email.toLowerCase()));
+      cid = hit ? hit.id : await createCustomer(env, me, { name: lead.name, email: lead.email || '', phone: lead.phone || '', source: SOURCES.indexOf(lead.source) >= 0 ? lead.source : 'Other', notes: '' });
+    }
+    if (!pid) {
+      if (!lead.address) fail(400, 'Add the property address to the enquiry first.');
+      const same = await env.DB.prepare('SELECT id FROM properties WHERE customer_id = ? AND deleted_at IS NULL AND lower(address) = lower(?)').bind(cid, lead.address).first();
+      pid = same ? same.id : await createProperty(env, me, cid, { address: lead.address, suburb: lead.suburb || '', access: '', hazards: '', lat: d.lat ?? null, lng: d.lng ?? null, zoom: null });
+    }
+    await env.DB.batch([env.DB.prepare("UPDATE enquiries SET customer_id = ?, property_id = ?, updated_at = datetime('now') WHERE id = ?").bind(cid, pid, id), leadEvent(env, id, 'linked', 'Customer and property set up for the quote', me.id)]);
+    return json({ customer_id: cid, property_id: pid });
+  }
+  if (!parts[2] && m === 'DELETE') {
+    await env.DB.prepare("UPDATE enquiries SET archived_at = datetime('now') WHERE id = ?").bind(id).run();
+    return json({ ok: true });
+  }
+  fail(404, 'Not found.');
+}
+/** Enquiry form for the public website (no sign-in): lands on the board as a New enquiry. */
+async function publicEnquiry(request, env, body) {
+  if (body.website) return json({ ok: true }); // a hidden field only bots fill in
+  const key = 'enq:' + ipOf(request), now = Date.now();
+  const row = await env.DB.prepare('SELECT count, expires FROM request_limits WHERE key = ?').bind(key).first();
+  const count = row && row.expires > now ? row.count : 0;
+  if (count >= 5) fail(429, 'Thanks — we already have your enquiry. We’ll be in touch soon.');
+  const name = str(body.name, 120), phone = str(body.phone, 40), email = str(body.email, 160);
+  if (!name || (!phone && !email)) fail(400, 'Please add your name and a phone number or email.');
+  const services = Array.isArray(body.services) ? body.services.map((x) => str(x, 40)).slice(0, 8) : [];
+  const lid = newId('enq');
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO enquiries (id, name, email, phone, address, suburb, details, status, source, stage_at, updated_at, sort) VALUES (?, ?, ?, ?, ?, ?, ?, 'New enquiry', 'Website', datetime('now'), datetime('now'), -1)")
+      .bind(lid, name, email, phone, str(body.address, 200), str(body.suburb, 80), JSON.stringify({ services, message: str(body.message, 2000) })),
+    leadEvent(env, lid, 'created', 'Enquiry from the website', null),
+    env.DB.prepare('INSERT INTO request_limits (key, count, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET count = excluded.count, expires = excluded.expires').bind(key, count + 1, row && row.expires > now ? row.expires : now + 3600000)]);
+  return json({ ok: true });
 }
 
 // ---------------- customers, properties, drawings ----------------
@@ -747,6 +911,7 @@ async function quoteFromRef(env, ref) {
   return q;
 }
 async function publicApi(request, env, parts, url, m, body) {
+  if (parts[1] === 'enquiry' && m === 'POST') return publicEnquiry(request, env, body);
   if (parts[1] !== 'quote') fail(404, 'Not found.');
   if (!parts[2] && m === 'GET') {
     const q = await quoteFromRef(env, url.searchParams.get('ref'));

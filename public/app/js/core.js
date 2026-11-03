@@ -39,6 +39,7 @@
     mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 7 8.5-7"/>',
     phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
     grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
+    funnel: '<path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/>',
     truck: '<path d="M3 6h11v10H3zM14 9h4l3 3.5V16h-7"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
     camera: '<path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h3L9 5h6l1.5 2h3A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/>'
   };
@@ -135,7 +136,7 @@
 
   // ---------------- shell ----------------
   var NAV = [
-    { g: 'Work' }, { id: 'overview', href: '#/', icon: 'overview', label: 'Overview' }, { id: 'quotes', href: '#/quotes', icon: 'quote', label: 'Quotes' }, { id: 'schedule', href: '#/schedule', icon: 'calendar', label: 'Schedule' },
+    { g: 'Work' }, { id: 'overview', href: '#/', icon: 'overview', label: 'Overview' }, { id: 'pipeline', href: '#/pipeline', icon: 'funnel', label: 'Pipeline' }, { id: 'quotes', href: '#/quotes', icon: 'quote', label: 'Quotes' }, { id: 'schedule', href: '#/schedule', icon: 'calendar', label: 'Schedule' },
     { g: 'Records' }, { id: 'customers', href: '#/customers', icon: 'users', label: 'Customers' }, { id: 'properties', href: '#/properties', icon: 'home', label: 'Properties' }, { id: 'map', href: '#/map', icon: 'layers', label: 'Map' },
     { g: 'Business' }, { id: 'services', href: '#/services', icon: 'tag', label: 'Services & pricing' }, { id: 'reports', href: '#/reports', icon: 'chart', label: 'Reports' }, { id: 'settings', href: '#/settings', icon: 'gear', label: 'Settings' }
   ];
@@ -152,7 +153,7 @@
     // phones: a bottom tab bar for the everyday pages; More opens the full menu
     var tabs = document.getElementById('tabbar') || document.body.appendChild(Object.assign(document.createElement('nav'), { id: 'tabbar' }));
     tabs.setAttribute('aria-label', 'Main');
-    tabs.innerHTML = [['overview', '#/', 'overview', 'Home'], ['quotes', '#/quotes', 'quote', 'Quotes'], ['schedule', '#/schedule', 'calendar', 'Schedule'], ['customers', '#/customers', 'users', 'Customers']]
+    tabs.innerHTML = [['overview', '#/', 'overview', 'Home'], ['pipeline', '#/pipeline', 'funnel', 'Pipeline'], ['quotes', '#/quotes', 'quote', 'Quotes'], ['schedule', '#/schedule', 'calendar', 'Schedule']]
       .map(function (t) { return '<a href="' + t[1] + '" data-nav="' + t[0] + '">' + icon(t[2]) + '<span>' + t[3] + '</span></a>'; }).join('') +
       '<button type="button" data-more>' + icon('more') + '<span>More</span></button>';
     tabs.querySelector('[data-more]').onclick = function () { document.body.classList.add('nav-open'); document.getElementById('scrim').hidden = false; };
@@ -185,7 +186,7 @@
       var m = routes[i].re.exec(path);
       if (!m) continue;
       document.querySelectorAll('[data-nav]').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-nav') === routes[i].nav); });
-      var more = document.querySelector('#tabbar [data-more]'); if (more) more.classList.toggle('on', ['overview', 'quotes', 'schedule', 'customers'].indexOf(routes[i].nav) < 0);
+      var more = document.querySelector('#tabbar [data-more]'); if (more) more.classList.toggle('on', ['overview', 'pipeline', 'quotes', 'schedule'].indexOf(routes[i].nav) < 0);
       var old = document.getElementById('view'), view = document.createElement('div'); // a fresh container: replies for a page you left land nowhere
       view.id = 'view'; old.replaceWith(view);
       window.scrollTo(0, 0);

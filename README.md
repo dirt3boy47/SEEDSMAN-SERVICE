@@ -61,6 +61,16 @@ Staff sign in at `/login.html`; the app is at `/app/`.
    **Reports › Man-hours** compares actual with estimated man-hours by task and hedge height band; after 3 jobs it suggests
    a corrected rate and applies it to the rate card in one tap.
 
+**Pipeline** (CRM): every enquiry is a card on a board — New enquiry › Contacted › Site visit › Quoted › Won › Scheduled
+› Done (and Lost). Drag cards between stages (mouse, or press and hold on a phone/iPad), or use **Move to** on the card.
+Cards move forward by themselves when a quote is saved for the enquiry's property, the quote is accepted, the job is booked
+and the job is closed out; every quote also gets a card. Dragging to **Won** offers to accept the quote, to **Scheduled**
+opens the schedule, to **Quoted** starts the quote (customer and property are set up from the enquiry, matched by phone or
+email), to **Lost** asks why. A card's sheet has Call / Text / Email / Directions (logged; calling a new enquiry moves it to
+Contacted), the next step, follow-up date, details and history. Follow-ups due show on the Overview.
+**Website form**: `/enquiry.html` is a public "ask for a quote" page — link it from your website; enquiries land in
+New enquiry (spam-protected, 5 per hour per connection).
+
 Other pages: **Overview** (open quotes, won this month, win rate, jobs this week, follow-ups), **Customers**,
 **Properties** (job locations with their site drawings, quotes and jobs), **Map** (the full-screen GIS workspace: every job
 location, draw and save site drawings), **Services & pricing** (the rate card), **Reports** (quoted vs won by month, by service,
@@ -128,6 +138,6 @@ Passwords are salted PBKDF2 hashes and sessions are stored as token hashes; 10 w
 npx wrangler d1 execute seedsmans --local --file schema/existing.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0004_property_location.sql
 npx wrangler d1 execute seedsmans --local --file migrations/0005_site_drawings.sql
-# …and each later migration in order (0006 – 0009)
+# …and each later migration in order (0006 – 0010)
 npx wrangler dev
 ```
