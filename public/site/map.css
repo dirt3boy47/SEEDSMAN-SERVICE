@@ -74,3 +74,4 @@ body.mapper { height: 100vh; height: 100dvh; overflow: hidden; display: flex; fl
 }
 
 .mapper .leaflet-control-attribution { max-width: 220px; font-size: 10px; line-height: 1.35; background: rgba(243, 239, 228, .85); }
+.mapper .leaflet-control-attribution .g-logo { font-family: Arial, sans-serif; font-weight: 700; color: #5f6368; letter-spacing: -.02em; }

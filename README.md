@@ -71,7 +71,7 @@ Contacted), the next step, follow-up date, details and history. Follow-ups due s
 **Public website** (`/`, `public/index.html`, `public/site/`) — built to the Seedsmans brand brief: warm cream, deep coastal
 green, Instrument Serif + Inter, full-screen hero (SEEDS ～ MANS), services with one photograph each, The Property (aerial
 with white survey linework), Selected properties, About, Contact. **Map your property** (`/map-your-property.html`): find
-the address, trace each hedge on Vicmap/Esri aerial imagery (lengths measured), choose height, faces, condition and access,
+the address, trace each hedge on Google satellite (the same Map Tiles imagery and key as the staff app; lengths measured), choose height, faces, condition and access,
 add photos, request a quote. Both forms post to the existing `/api/public/enquiry` (and photo) endpoints, so each enquiry
 lands in the Pipeline as a New enquiry from the website — the property pin as its location and the traced hedges, lengths
 and details in its notes. Phone, email and ABN come from Settings › Business details. Staff app: `/app/`.

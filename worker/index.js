@@ -491,6 +491,8 @@ async function publicEnquiryPhoto(request, env, lid, t) {
 async function publicBusiness(env) {
   const b = await business(env), r = await activeRates(env), pub = {};
   ['name', 'tradingName', 'phone', 'email', 'abn', 'address', 'website'].forEach((k) => { if (b[k]) pub[k] = b[k]; });
+  // the Google satellite browser key (referrer-restricted) for the Map your property page — the owner chose one key for all
+  if (b.imagery && b.imagery.googleKey) pub.mapKey = b.imagery.googleKey;
   pub.services = (r.services || []).filter((x) => x.active !== false).map((x) => ({ id: x.id, name: x.name, description: x.description || '', category: x.category || 'Other' }));
   return new Response(JSON.stringify(pub), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' } });
 }

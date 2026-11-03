@@ -14,14 +14,39 @@
 
   // ---------- the aerial map ----------
   var map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 21 }).setView([-38.38, 145.05], 11);
-  L.control.attribution({ position: 'topright', prefix: '<a href="https://leafletjs.com">Leaflet</a>' }).addTo(map);
+  var attribution = L.control.attribution({ position: 'topright', prefix: '<a href="https://leafletjs.com">Leaflet</a>' }).addTo(map);
   L.control.zoom({ position: 'topright' }).addTo(map);
   window.SMmap = map; // for testing
-  var vic = L.tileLayer('https://base.maps.vic.gov.au/service?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=AERIAL_WM_256&STYLE=default&FORMAT=image/png&TILEMATRIXSET=EPSG:3857:256&TILEMATRIX=EPSG:3857:256:{z}&TILEROW={y}&TILECOL={x}', { maxNativeZoom: 20, maxZoom: 21, attribution: 'Imagery © State of Victoria (Vicmap)' });
-  var esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 21, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' });
-  vic.addTo(map);
-  var vicFails = 0; vic.on('tileerror', function () { if (++vicFails === 6 && map.hasLayer(vic)) { map.removeLayer(vic); esri.addTo(map); } });
-  L.control.layers({ 'Vicmap aerial': vic, 'Esri aerial': esri }, null, { position: 'topright' }).addTo(map);
+  // Google satellite only — the same Google Map Tiles imagery as the staff app — with Google's logo and imagery credit
+  var GT = 'https://tile.googleapis.com', gKey = null, gSession = null, gAttr = null, gTimer = null;
+  function googleSession(key) {
+    try { var c = JSON.parse(localStorage.getItem('sm-gsession') || 'null'); if (c && c.key === key && c.expiry * 1000 > Date.now() + 3600000) return Promise.resolve(c.session); } catch (e) { /* no storage */ }
+    return fetch(GT + '/v1/createSession?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapType: 'satellite', language: 'en-AU', region: 'AU', layerTypes: ['layerRoadmap'], overlay: false }) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.session) throw new Error((d.error && d.error.message) || 'no session'); return d; }); })
+      .then(function (d) { try { localStorage.setItem('sm-gsession', JSON.stringify({ key: key, session: d.session, expiry: +d.expiry || Date.now() / 1000 + 86400 })); } catch (e) { /* ignore */ } return d.session; });
+  }
+  function googleCredit() {
+    clearTimeout(gTimer);
+    gTimer = setTimeout(function () {
+      if (!gSession) return; var b = map.getBounds();
+      fetch(GT + '/tile/v1/viewport?session=' + gSession + '&key=' + encodeURIComponent(gKey) + '&zoom=' + Math.round(map.getZoom()) + '&north=' + b.getNorth().toFixed(5) + '&south=' + b.getSouth().toFixed(5) + '&east=' + b.getEast().toFixed(5) + '&west=' + b.getWest().toFixed(5))
+        .then(function (r) { return r.json(); }).then(function (d) { setCredit(d.copyright || ''); }).catch(function () {});
+    }, 500);
+  }
+  function setCredit(text) { if (gAttr) attribution.removeAttribution(gAttr); gAttr = '<b class="g-logo">Google</b>' + (text ? ' ' + esc(text) : ''); attribution.addAttribution(gAttr); }
+  function fallback() { // only if Google can't be reached, so the page is never blank
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 21, attribution: 'Imagery © Esri, Maxar' }).addTo(map);
+  }
+  fetch('/api/public/business').then(function (r) { return r.ok ? r.json() : {}; }).then(function (b) {
+    if (!b.mapKey) throw new Error('no key');
+    gKey = b.mapKey;
+    return googleSession(gKey).then(function (session) {
+      gSession = session;
+      L.tileLayer(GT + '/v1/2dtiles/{z}/{x}/{y}?session=' + session + '&key=' + encodeURIComponent(gKey), { maxZoom: 22, maxNativeZoom: 21, keepBuffer: 4 }).addTo(map);
+      setCredit(''); googleCredit(); map.on('moveend', googleCredit);
+    });
+  }).catch(fallback);
   var pinMarker = null, layer = L.layerGroup().addTo(map);
   var pinIcon = L.divIcon({ className: 'mpin', html: '<span></span>', iconSize: [26, 26], iconAnchor: [13, 13] });
 
