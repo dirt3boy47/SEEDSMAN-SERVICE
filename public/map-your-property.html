@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#243C35">
+<title>Map your property — Seedsmans</title>
+<meta name="description" content="Find your property on the aerial, trace the hedges, and request a measured quote from Seedsmans.">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<link rel="stylesheet" href="/site/site.css">
+<link rel="stylesheet" href="/site/map.css">
+</head>
+<body class="mapper">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="sm-mark" viewBox="0 0 40 24"><path d="M2 16c4-6 8-6 12 0l2-3V8h10v5l2 3c3-3 7-4 10-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol></svg>
+<header class="mbar">
+  <a class="brand" href="/" aria-label="Seedsmans — home"><svg class="mark"><use href="#sm-mark"/></svg><span>SEEDSMANS</span></a>
+  <ol class="mprog" id="prog" aria-label="Steps"><li data-s="0">Property</li><li data-s="1">Hedges</li><li data-s="2">Details</li><li data-s="3">Access</li><li data-s="4">Contact</li></ol>
+  <a class="mclose" href="/" aria-label="Close">✕</a>
+</header>
+<div class="mwrap">
+  <div id="map" class="mmap" aria-label="Aerial map"></div>
+  <div class="mhint" id="hint" hidden></div>
+  <div class="mtools" id="tools" hidden>
+    <button type="button" id="undo">Undo point</button>
+    <button type="button" id="finish" class="primary">Finish hedge</button>
+  </div>
+  <aside class="mpanel" id="panel">
+    <div class="mgrab" id="grab" aria-hidden="true"></div>
+    <div class="mstep" id="step"></div>
+    <div class="mnav"><button type="button" class="btn line" id="back">Back</button><button type="button" class="btn solid" id="next">Continue</button></div>
+  </aside>
+</div>
+<script src="/vendor/leaflet.js"></script>
+<script src="/site/site.js"></script>
+<script src="/site/map.js"></script>
+</body>
+</html>
