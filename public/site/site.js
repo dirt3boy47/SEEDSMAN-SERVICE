@@ -1,4 +1,4 @@
-/* Seedsmans — website behaviour: navigation, reveals, the property linework, business details from the app, and the
+/* Seedsmans — website behaviour: navigation, business details from the app, and the
    quote form (sent to the existing /api/public/enquiry endpoint, so it lands in the staff Pipeline as a New enquiry). */
 (function () {
   'use strict';
@@ -21,20 +21,16 @@
   SM.biz({});
   fetch('/api/public/business').then(function (r) { return r.ok ? r.json() : {}; }).then(SM.biz).catch(function () {});
 
-  // navigation: transparent over the photograph, cream after; full-screen menu on phones
-  var nav = $('#nav'), links = $('#links'), burger = $('#burger'), hero = $('.hero');
-  function onScroll() { if (nav) nav.classList.toggle('solid', !hero || window.scrollY > hero.offsetHeight - 90); }
+  // navigation: a fine rule appears once the page scrolls; full-screen menu on phones (Escape closes it)
+  var nav = $('#nav'), links = $('#links'), burger = $('#burger');
+  function onScroll() { if (nav) nav.classList.toggle('solid', window.scrollY > 8); }
   window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
   if (burger) {
-    burger.onclick = function () { var open = !links.classList.contains('open'); links.classList.toggle('open', open); nav.classList.toggle('open', open); burger.setAttribute('aria-expanded', open); document.body.style.overflow = open ? 'hidden' : ''; };
-    links.addEventListener('click', function (e) { if (e.target.closest('a')) { links.classList.remove('open'); nav.classList.remove('open'); burger.setAttribute('aria-expanded', 'false'); document.body.style.overflow = ''; } });
+    var setMenu = function (open) { links.classList.toggle('open', open); burger.setAttribute('aria-expanded', open); burger.setAttribute('aria-label', open ? 'Close menu' : 'Menu'); document.body.style.overflow = open ? 'hidden' : ''; };
+    burger.onclick = function () { setMenu(!links.classList.contains('open')); };
+    links.addEventListener('click', function (e) { if (e.target.closest('a')) setMenu(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && links.classList.contains('open')) { setMenu(false); burger.focus(); } });
   }
-
-  // reveal on scroll; the property linework draws itself in
-  if ('IntersectionObserver' in window) {
-    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); if (e.target.id === 'aerial') e.target.classList.add('on'); io.unobserve(e.target); } }); }, { threshold: 0.18 });
-    $$('.reveal').forEach(function (el) { io.observe(el); });
-  } else $$('.reveal').forEach(function (el) { el.classList.add('in', 'on'); });
 
   // ---------- shared helpers (also used by the Map your property page) ----------
   /** Address suggestions (Photon / OpenStreetMap), biased to the Peninsula. onPick({address, suburb, lat, lng}) */
@@ -87,7 +83,9 @@
   };
   /** One-choice or many-choice option buttons. */
   SM.options = function (box, many) {
-    box.addEventListener('click', function (e) { var b = e.target.closest('[data-v]'); if (!b) return; if (many) b.classList.toggle('on'); else $$('[data-v]', box).forEach(function (x) { x.classList.toggle('on', x === b); }); box.dispatchEvent(new Event('change')); });
+    var mark = function () { $$('[data-v]', box).forEach(function (x) { x.setAttribute('aria-pressed', x.classList.contains('on')); }); };
+    box.addEventListener('click', function (e) { var b = e.target.closest('[data-v]'); if (!b) return; if (many) b.classList.toggle('on'); else $$('[data-v]', box).forEach(function (x) { x.classList.toggle('on', x === b); }); mark(); box.dispatchEvent(new Event('change')); });
+    mark();
     return function () { var on = $$('[data-v].on', box).map(function (b) { return b.getAttribute('data-v'); }); return many ? on : on[0] || ''; };
   };
   /** Send an enquiry (and any photos) to the existing endpoint — it becomes a New enquiry in the Pipeline. */
@@ -108,7 +106,7 @@
 
   // ---------- the quote form on the homepage ----------
   var form = $('#qform'); if (!form) return;
-  var pin = null, services = SM.options($('#svc'), true), contact = SM.options($('#contactPref')), photos = SM.photoPicker($('#photos'), $('#thumbs'), 3);
+  var pin = null, services = SM.options($('#svc'), true), access = SM.options($('#access'), true), when = SM.options($('#when')), contact = SM.options($('#contactPref')), photos = SM.photoPicker($('#photos'), $('#thumbs'), 3);
   SM.addressInput($('#addr'), $('#suggest'), function (p) { if (p.suburb) $('#suburb').value = p.suburb; pin = { lat: p.lat, lng: p.lng }; });
   $('#addr').addEventListener('input', function () { pin = null; });
   form.addEventListener('submit', function (e) {
@@ -117,10 +115,11 @@
     if (!v('name')) { err.textContent = 'Please add your name.'; form.elements.name.focus(); return; }
     if (!v('phone') && !v('email')) { err.textContent = 'Please add a phone number or email.'; form.elements.phone.focus(); return; }
     err.textContent = ''; send.disabled = true; send.textContent = 'Sending…';
-    var body = { name: v('name'), phone: v('phone'), email: v('email'), address: v('address'), suburb: v('suburb'), message: v('message'), services: services(), contact: contact(), website: v('website') };
+    var msg = [v('dims') ? 'Approximate dimensions: ' + v('dims') + '.' : '', access().length ? 'Access: ' + access().join(', ').toLowerCase() + '.' : '', v('message')].filter(Boolean).join('\n');
+    var body = { name: v('name'), phone: v('phone'), email: v('email'), address: v('address'), suburb: v('suburb'), message: msg, services: services(), when: when(), contact: contact(), website: v('website') };
     if (pin) { body.lat = pin.lat; body.lng = pin.lng; }
     SM.sendEnquiry(body, photos).then(function () {
       form.outerHTML = SM.thanks(body.name, contact() === 'Email' ? 'email' : contact() === 'Text' ? 'text' : 'call');
-    }).catch(function (x) { err.textContent = x.message; send.disabled = false; send.textContent = 'Request a quote'; });
+    }).catch(function (x) { err.textContent = x.message; send.disabled = false; send.textContent = 'Request a Quote'; });
   });
 })();

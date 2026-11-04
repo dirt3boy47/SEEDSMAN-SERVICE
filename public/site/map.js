@@ -135,19 +135,19 @@
     var el = $('#step'), h = '';
     $$('#prog li').forEach(function (li) { var s = +li.getAttribute('data-s'); li.classList.toggle('on', s === S.step); li.classList.toggle('done', s < S.step); });
     if (S.step === 0) {
-      h = '<p class="label">01 — The property</p><h2>Find your property.</h2><p class="lede">Search the address, then check the pin sits on the house.</p>' +
+      h = '<p class="label">01 — The property</p><h2>Find your property</h2><p class="lede">Search the address, then check the pin sits on the house.</p>' +
         '<label class="mfield">Address<input id="m-addr" value="' + esc(S.address) + '" placeholder="Start typing your street" autocomplete="off"><div class="suggest" id="m-sug" hidden></div></label>' +
         (S.pin ? '<p class="mnote">Pin placed' + (S.suburb ? ' · ' + esc(S.suburb) : '') + '. Drag it if it isn’t on the house.</p>' : '');
     } else if (S.step === 1) {
       var t = totals();
-      h = '<p class="label">02 — Draw</p><h2>Show us what needs doing.</h2><p class="lede">Pick what to draw, then tap on the map.</p>' +
+      h = '<p class="label">02 — Draw</p><h2>What needs doing</h2><p class="lede">Pick what to draw, then tap on the map.</p>' +
         '<div class="mmodes" id="m-modes">' + Object.keys(KINDS).map(function (k) { return '<button type="button" data-mode="' + k + '" class="' + (S.mode === k ? 'on' : '') + '"><i class="mi-' + k + '"></i>' + esc(KINDS[k].plural) + '</button>'; }).join('') + '</div>' +
         '<p class="mhow">' + esc(KINDS[S.mode].how) + '</p>' +
         '<div class="mlist">' + (S.shapes.length ? S.shapes.map(function (x, i) { return '<div class="mrow"><span class="mletter mi-' + x.type + '"></span><span class="grow">' + esc(nameOf(x)) + '<small>' + esc(size(x)) + '</small></span><button type="button" class="mx" data-del="' + i + '" aria-label="Remove ' + esc(nameOf(x)) + '">Remove</button></div>'; }).join('') : '<p class="mempty">Nothing drawn yet.</p>') + '</div>' +
         (S.shapes.length ? '<div class="mtotals">' + (t.lm ? '<p><span>Hedge</span><b>' + Math.round(t.lm) + ' LM</b></p>' : '') + (t.m2 ? '<p><span>Lawn</span><b>' + Math.round(t.m2) + ' M²</b></p>' : '') + (t.trees ? '<p><span>Trees</span><b>' + t.trees + '</b></p>' : '') + '</div>' : '') +
         '<button type="button" class="mskip" id="m-skip">' + (S.skip ? '✓ I’ll describe it instead' : 'Can’t see it clearly? Describe it instead') + '</button>';
     } else if (S.step === 2) {
-      h = '<p class="label">03 — Details</p><h2>A little more about each.</h2>';
+      h = '<p class="label">03 — Details</p><h2>The details</h2>';
       if (S.skip && !S.shapes.length) h += '<label class="mfield">Describe the work<textarea id="m-desc" rows="5" placeholder="e.g. Cypress along the front fence, about 30 m long and 3 m high; back lawn; two gums to prune">' + esc(S.describe) + '</textarea></label>';
       else h += S.shapes.map(function (x, i) {
         var head = '<div class="mhh"><span class="mletter mi-' + x.type + '"></span><b>' + esc(nameOf(x)) + '</b><small>' + esc(size(x)) + '</small></div>';
@@ -156,14 +156,14 @@
         return '<div class="mhedge" data-i="' + i + '">' + head + '<p class="mlab">Tree size</p>' + opts('size', TREE_SIZES, x.size) + '</div>';
       }).join('');
     } else if (S.step === 3) {
-      h = '<p class="label">04 — Access</p><h2>Access and clean-up.</h2>' +
+      h = '<p class="label">04 — Access</p><h2>Access and clean-up</h2>' +
         '<p class="mlab">Getting in</p>' + opts('access', ACCESS, S.access, true) +
         '<p class="mlab">Green waste</p>' + opts('waste', ['Take it away', 'Leave on site'], S.waste) +
         '<p class="mlab">Photographs <small>optional · up to 3</small></p><label class="photo"><input type="file" id="m-photos" accept="image/*" multiple><span>Add photographs</span></label><div class="thumbs" id="m-thumbs"></div>' +
         '<label class="mfield">Anything else?<textarea id="m-notes" rows="3" placeholder="Gate codes, dogs, timing">' + esc(S.notes) + '</textarea></label>';
     } else if (S.step === 4) {
       var tt = totals(), parts = [tt.lm ? Math.round(tt.lm) + ' LM hedge' : '', tt.m2 ? Math.round(tt.m2) + ' m² lawn' : '', tt.trees ? tt.trees + ' tree' + (tt.trees === 1 ? '' : 's') : ''].filter(Boolean);
-      h = '<p class="label">05 — Contact</p><h2>Where should we send the quote?</h2>' +
+      h = '<p class="label">05 — Contact</p><h2>Your details</h2>' +
         '<label class="mfield">Name<input id="m-name" autocomplete="name" value="' + esc(S.name) + '"></label>' +
         '<label class="mfield">Phone<input id="m-phone" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(S.phone) + '"></label>' +
         '<label class="mfield">Email<input id="m-email" type="email" autocomplete="email" value="' + esc(S.email) + '"></label>' +

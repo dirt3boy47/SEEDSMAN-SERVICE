@@ -68,9 +68,13 @@ and the job is closed out; every quote also gets a card. Dragging to **Won** off
 opens the schedule, to **Quoted** starts the quote (customer and property are set up from the enquiry, matched by phone or
 email), to **Lost** asks why. A card's sheet has Call / Text / Email / Directions (logged; calling a new enquiry moves it to
 Contacted), the next step, follow-up date, details and history. Follow-ups due show on the Overview.
-**Public website** (`/`, `public/index.html`, `public/site/`) — built to the Seedsmans brand brief: warm cream, deep coastal
-green, Instrument Serif + Inter, full-screen hero (SEEDS ～ MANS), services with one photograph each, The Property (aerial
-with white survey linework), Selected properties, About, Contact. **Map your property** (`/map-your-property.html`): find
+**Public website** (`/`, `public/index.html`, `public/site/`) — built to the Seedsmans Brand Guidelines V2.0 (contour-led
+identity): the master contour symbol (`public/site/brand/contour-*.svg`, also inlined as `#contour` — one path, scaled
+uniformly, never redrawn) leads, with the rounded SEEDSMANS name second and COASTAL HEDGE CARE third; cream and coastal
+green; bold rounded uppercase headings (Nunito until the custom lettering is finalised), Inter body, Barlow Condensed for
+short labels. Nav: Services / Our Work / About / Request a Quote. Homepage: contour-led hero → services → our work → how
+quoting works → about → request a quote (name, contact, property, service, approximate dimensions, access, photos,
+preferred timing). **Map your property** (`/map-your-property.html`): find
 the address, then on Google satellite (the same Map Tiles imagery and key as the staff app) draw hedges (lines), lawns to
 mow (areas) and trees to prune (points); add height / faces / condition, mowing and tree size, access and photos; request a
 quote. The shapes travel with the enquiry and **Start a quote** saves them on the property as site drawings (hedge, lawn

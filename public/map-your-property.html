@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-AU">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,15 +9,16 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&family=Barlow+Condensed:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/vendor/leaflet.css">
 <link rel="stylesheet" href="/site/site.css">
 <link rel="stylesheet" href="/site/map.css">
 </head>
 <body class="mapper">
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="sm-mark" viewBox="0 0 40 24"><path d="M2 16c4-6 8-6 12 0l2-3V8h10v5l2 3c3-3 7-4 10-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol></svg>
+<!-- The Seedsmans contour: the approved master path (see /site/brand/) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="contour" viewBox="0 -8 830 116"><path d="M8 63C118 45 236 5 334 3C390 1 410 7 411 38V70C411 92 423 99 457 99L822 92" fill="none" stroke="currentColor" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></symbol></svg>
 <header class="mbar">
-  <a class="brand" href="/" aria-label="Seedsmans — home"><svg class="mark"><use href="#sm-mark"/></svg><span>SEEDSMANS</span></a>
+  <a class="lockup nav-lockup" href="/" aria-label="Seedsmans — home"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span class="wm">SEEDSMANS</span></a>
   <ol class="mprog" id="prog" aria-label="Steps"><li data-s="0">Property</li><li data-s="1">Draw</li><li data-s="2">Details</li><li data-s="3">Access</li><li data-s="4">Contact</li></ol>
   <a class="mclose" href="/" aria-label="Close">✕</a>
 </header>

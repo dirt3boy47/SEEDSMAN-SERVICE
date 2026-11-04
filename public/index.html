@@ -1,177 +1,127 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-AU">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#243C35">
-<title>Seedsmans — Coastal Hedge &amp; Garden Care</title>
-<meta name="description" content="Seedsmans maintains established hedges and gardens across coastal properties on the Mornington Peninsula. Coastal landscapes, precisely kept.">
-<meta property="og:title" content="Seedsmans — Coastal landscapes, precisely kept.">
-<meta property="og:description" content="Hedge cutting, hedge reductions and estate maintenance for coastal properties.">
+<title>Seedsmans — Coastal Hedge Care</title>
+<meta name="description" content="Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula. Request a quote online.">
+<meta property="og:title" content="Seedsmans — Coastal hedge care">
+<meta property="og:description" content="Hedge cutting, hedge reductions, scheduled maintenance and green waste removal on the Mornington Peninsula.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="/site/img/hero.jpg">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&family=Barlow+Condensed:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/site/site.css">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"LocalBusiness","name":"Seedsmans","slogan":"Coastal landscapes, precisely kept.","description":"Coastal hedge and garden care for established properties on the Mornington Peninsula.","areaServed":"Mornington Peninsula, Victoria","image":"/site/img/hero.jpg"}
+{"@context":"https://schema.org","@type":"LocalBusiness","name":"Seedsmans","slogan":"Coastal landscapes, precisely kept.","description":"Hedge cutting, hedge reductions, scheduled maintenance and green waste removal for coastal properties on the Mornington Peninsula.","areaServed":"Mornington Peninsula, Victoria","image":"/site/img/hero.jpg"}
 </script>
 </head>
 <body>
-<!-- the Seedsmans line: wave → hedge → landscape (used as the mark, the hero divider and the section rules) -->
+<!-- The Seedsmans contour (brand guidelines V2.0): one approved master path, scaled uniformly, never redrawn.
+     Master files: /site/brand/contour-green.svg and /site/brand/contour-cream.svg -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="sm-line" viewBox="0 0 120 24"><path d="M1 16c6-9 12-9 18 0s12 9 18 0l3-4V7h26v5l3 4c7-6 15-8 22-4s14 6 28 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="sm-mark" viewBox="0 0 40 24"><path d="M2 16c4-6 8-6 12 0l2-3V8h10v5l2 3c3-3 7-4 10-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="contour" viewBox="0 -8 830 116"><path d="M8 63C118 45 236 5 334 3C390 1 410 7 411 38V70C411 92 423 99 457 99L822 92" fill="none" stroke="currentColor" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </svg>
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="nav" id="nav">
-  <a class="brand" href="#top" aria-label="Seedsmans — home"><svg class="mark"><use href="#sm-mark"/></svg><span>SEEDSMANS</span></a>
+  <a class="lockup nav-lockup" href="#top" aria-label="Seedsmans — home"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span class="wm">SEEDSMANS</span></a>
   <nav class="links" id="links" aria-label="Main">
-    <a href="#services">Services</a><a href="#work">Work</a><a href="#about">About</a><a href="#contact">Contact</a>
-    <a class="pill" href="#contact">Request a quote</a>
+    <a href="#services">Services</a><a href="#work">Our Work</a><a href="#about">About</a>
+    <a class="btn solid nav-cta" href="#quote">Request a Quote</a>
   </nav>
-  <button class="burger" id="burger" aria-label="Menu" aria-expanded="false"><span></span><span></span></button>
+  <button class="burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="links"><span></span><span></span></button>
 </header>
 
-<main id="top">
-  <!-- HERO -->
-  <section class="hero">
-    <img class="hero-img" src="/site/img/hero.jpg" alt="An established clipped hedge in a coastal garden, the sea beyond" fetchpriority="high">
-    <div class="hero-shade"></div>
-    <div class="hero-in">
-      <h1 class="word" aria-label="Seedsmans">
-        <span class="w1">SEEDS</span>
-        <svg class="divide" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M1 16c6-9 12-9 18 0s12 9 18 0l3-4V7h26v5l3 4c7-6 15-8 22-4s14 6 28 2"/></svg>
-        <span class="w2">MANS</span>
-      </h1>
-      <p class="kicker">Coastal hedge &amp; garden care</p>
-      <p class="hero-line">Maintaining considered landscapes along the coast.</p>
-      <div class="hero-cta"><a class="btn solid" href="#contact">Request a quote</a><a class="btn line light" href="#work">Our work</a></div>
+<main id="main">
+  <!-- HERO: contour-led, supporting name, hedge photograph, Request a quote -->
+  <section class="hero" id="top">
+    <div class="hero-mark">
+      <svg class="contour hero-contour" role="img" aria-label="Seedsmans contour"><use href="#contour"/></svg>
+      <h1 class="lockup-name"><span class="wm">SEEDSMANS</span><span class="desc">Coastal hedge care</span></h1>
+      <p class="hero-line">Hedge cutting, shaping and scheduled maintenance for coastal properties on the Mornington Peninsula.</p>
+      <div class="hero-cta"><a class="btn solid" href="#quote">Request a Quote</a><a class="btn line" href="#work">Our Work</a></div>
     </div>
-    <div class="hero-foot"><span>38.38° S · 145.12° E</span><span>Mornington Peninsula VIC</span><a href="#approach" class="scroll">Scroll</a></div>
-  </section>
-
-  <!-- APPROACH -->
-  <section class="statement" id="approach">
-    <svg class="contours" viewBox="0 0 1200 600" preserveAspectRatio="none" aria-hidden="true">
-      <g fill="none" stroke="currentColor" stroke-width="1">
-        <path d="M-20 420C180 360 300 470 520 410S900 300 1220 360"/><path d="M-20 455C190 395 310 505 530 445S910 335 1220 395"/>
-        <path d="M-20 490C200 430 320 540 540 480S920 370 1220 430"/><path d="M-20 385C170 325 290 435 510 375S890 265 1220 325"/>
-        <path d="M-20 350C160 290 280 400 500 340S880 230 1220 290"/><path d="M-20 525C210 465 330 575 550 515S930 405 1220 465"/>
-      </g>
-    </svg>
-    <div class="wrap">
-      <p class="label">01 — Approach</p>
-      <h2 class="big">Coastal landscapes,<br><em>precisely kept.</em></h2>
-      <div class="statement-cols">
-        <p>Seedsmans looks after established hedges and gardens on coastal properties — the clipped lines, the wind-shaped screens and the larger grounds that need a steady hand through every season.</p>
-        <p>We keep gardens looking considered without making them feel over-managed, and we price every property by measuring the landscape first.</p>
-      </div>
-    </div>
+    <!-- Placeholder image: replace with an authorised photograph of finished Seedsmans hedge work before launch. -->
+    <figure class="hero-photo"><img src="/site/img/hero.jpg" alt="A clipped hedge on a coastal property, with the bay behind" fetchpriority="high"></figure>
   </section>
 
   <!-- SERVICES -->
-  <section class="services" id="services">
+  <section class="sec services" id="services">
     <div class="wrap">
-      <div class="sec-head"><p class="label">02 — Services</p><h2>What we maintain</h2></div>
-      <article class="svc reveal">
-        <figure><img src="/site/img/svc-hedge-cutting.jpg" alt="A long clipped hedge beside a gravel path" loading="lazy"></figure>
-        <div><span class="num">01</span><h3>Hedge cutting</h3><p>Routine and one-off maintenance of established hedges. Every face kept to a clean, even line.</p></div>
-      </article>
-      <article class="svc flip reveal">
-        <figure><img src="/site/img/svc-reductions.jpg" alt="A tall, mature hedge being brought back into shape" loading="lazy"></figure>
-        <div><span class="num">02</span><h3>Hedge reductions</h3><p>Controlled reductions and reshaping of mature hedging — height and width brought back without losing the screen.</p></div>
-      </article>
-      <article class="svc reveal">
-        <figure><img src="/site/img/svc-estate.jpg" alt="Structured hedging on a large coastal property" loading="lazy"></figure>
-        <div><span class="num">03</span><h3>Estate maintenance</h3><p>Scheduled landscape maintenance for larger residential properties, planned around the seasons.</p></div>
-      </article>
-      <article class="svc flip reveal">
-        <figure><img src="/site/img/svc-green-waste.jpg" alt="Fresh hedge clippings, close up" loading="lazy"></figure>
-        <div><span class="num">04</span><h3>Green waste</h3><p>Removal and responsible management of the vegetation generated during maintenance.</p></div>
-      </article>
-      <div class="sec-cta"><a class="btn line" href="#contact">Discuss your property</a></div>
-    </div>
-  </section>
-
-  <!-- THE PROPERTY -->
-  <section class="property" id="property">
-    <div class="wrap property-in">
-      <div class="property-copy reveal">
-        <p class="label light">03 — The property</p>
-        <h2>Every property is different.<br><em>We measure the landscape before we price it.</em></h2>
-        <ol class="mini-steps">
-          <li><span>01</span>Search your address</li>
-          <li><span>02</span>Draw hedges, lawns and trees on the aerial</li>
-          <li><span>03</span>Add heights, sizes and access</li>
-          <li><span>04</span>Add photos and request a quote</li>
-        </ol>
-        <a class="btn solid sand" href="/map-your-property.html">Map your property</a>
+      <div class="sec-head"><p class="tag">Services</p><h2>What we do</h2></div>
+      <div class="svc-grid">
+        <article class="svc"><figure><img src="/site/img/svc-hedge-cutting.jpg" alt="A long clipped hedge beside a gravel path" loading="lazy"></figure>
+          <h3>Hedge cutting</h3><p>Routine and one-off cutting of established hedges. Tops and faces cut to a clean, even line.</p></article>
+        <article class="svc"><figure><img src="/site/img/svc-reductions.jpg" alt="A tall hedge being cut back" loading="lazy"></figure>
+          <h3>Hedge reductions</h3><p>Overgrown hedges reduced in height and width, and shaped back into a line you can maintain.</p></article>
+        <article class="svc"><figure><img src="/site/img/svc-estate.jpg" alt="Hedging along a driveway on a larger property" loading="lazy"></figure>
+          <h3>Scheduled maintenance</h3><p>Regular visits through the year so hedges and garden edges stay at the height and shape you want.</p></article>
+        <article class="svc"><figure><img src="/site/img/svc-green-waste.jpg" alt="Hedge clippings collected for removal" loading="lazy"></figure>
+          <h3>Green waste</h3><p>Clippings and cuttings collected and taken away. We leave the site raked and tidy.</p></article>
       </div>
-      <figure class="aerial reveal" id="aerial">
-        <img src="/site/img/aerial-property.jpg" alt="An aerial view of a coastal property with its hedges outlined" loading="lazy">
-        <svg viewBox="0 0 2000 1400" aria-hidden="true">
-          <path class="boundary" d="M60 56H1920V812L1240 1204H60Z"/>
-          <g class="hedge-lines">
-            <path pathLength="1" d="M120 112H1840V728"/>
-            <path pathLength="1" d="M120 420V1092L680 1176"/>
-            <path pathLength="1" d="M800 868H1480"/>
-            <path pathLength="1" d="M360 560H600V840H360Z"/>
-          </g>
-          <g class="tags">
-            <circle cx="980" cy="112" r="9"/><text x="1000" y="92">HEDGE A · 94 LM</text>
-            <circle cx="120" cy="760" r="9"/><text x="146" y="752">HEDGE B · 62 LM</text>
-            <circle cx="1140" cy="868" r="9"/><text x="1160" y="848">HEDGE C · 18 LM</text>
-            <circle cx="600" cy="700" r="9"/><text x="626" y="692">PARTERRE · 12 LM</text>
-          </g>
-        </svg>
-        <figcaption><span>Property / 024</span><span>38.31° S</span><span>Portsea VIC</span><span>Hedge / 186 LM</span></figcaption>
-      </figure>
     </div>
   </section>
 
-  <!-- WORK -->
-  <section class="work" id="work">
+  <!-- OUR WORK -->
+  <section class="sec work" id="work">
     <div class="wrap">
-      <div class="sec-head"><p class="label">04 — Selected properties</p><h2>Recent work</h2></div>
-      <!-- Placeholder projects and images: replace with real Seedsmans properties before launch. -->
+      <div class="sec-head"><p class="tag">Selected work</p><h2>Our work</h2></div>
+      <!-- Placeholder images: replace with genuine, authorised Seedsmans projects (with the owners' permission) before launch.
+           Captions describe the work only — no invented locations or quantities. -->
       <div class="projects">
-        <article class="proj p1 reveal"><figure><img src="/site/img/work-01.jpg" alt="Aerial view of a coastal residence" loading="lazy"></figure>
-          <div class="proj-meta"><span class="pn">01 / Coastal residence</span><span>Mornington Peninsula</span><span>Hedge maintenance</span><span>180 linear metres</span></div></article>
-        <article class="proj p2 reveal"><figure><img src="/site/img/work-02.jpg" alt="Aerial view of a clifftop property" loading="lazy"></figure>
-          <div class="proj-meta"><span class="pn">02 / Clifftop property</span><span>Portsea</span><span>Hedge reduction</span><span>95 linear metres</span></div></article>
-        <article class="proj p3 reveal"><figure><img src="/site/img/work-03.jpg" alt="A long hedge line beside a path" loading="lazy"></figure>
-          <div class="proj-meta"><span class="pn">03 / Garden estate</span><span>Red Hill</span><span>Estate maintenance</span><span>Seasonal schedule</span></div></article>
-        <article class="proj p4 reveal"><figure><img src="/site/img/work-04.jpg" alt="A clipped hedge in a coastal garden" loading="lazy"></figure>
-          <div class="proj-meta"><span class="pn">04 / Bayside garden</span><span>Mount Martha</span><span>Hedge cutting</span><span>64 linear metres</span></div></article>
+        <figure class="proj p1"><img src="/site/img/work-01.jpg" alt="A coastal property with clipped hedging" loading="lazy"><figcaption><span class="tag">Hedge cutting</span>Boundary hedges cut to a level top</figcaption></figure>
+        <figure class="proj p2"><img src="/site/img/work-02.jpg" alt="A clifftop property with a reduced hedge" loading="lazy"><figcaption><span class="tag">Hedge reduction</span>Height brought down, screen kept</figcaption></figure>
+        <figure class="proj p3"><img src="/site/img/work-03.jpg" alt="A long hedge line beside a path" loading="lazy"><figcaption><span class="tag">Scheduled maintenance</span>Seasonal visits through the year</figcaption></figure>
+        <figure class="proj p4"><img src="/site/img/work-04.jpg" alt="A clipped hedge in a coastal garden" loading="lazy"><figcaption><span class="tag">Hedge shaping</span>Faces and corners squared up</figcaption></figure>
       </div>
+    </div>
+  </section>
+
+  <!-- PROCESS -->
+  <section class="sec process" id="process">
+    <div class="wrap process-in">
+      <div>
+        <p class="tag light">How quoting works</p>
+        <h2>From enquiry<br>to booked work</h2>
+        <p class="process-lede">Every quote is based on the actual hedges at your property, measured before we price.</p>
+        <a class="btn solid cream" href="/map-your-property.html">Map your property</a>
+        <p class="process-note">Prefer to draw it yourself? Find your property on the aerial and mark the hedges, lawns and trees.</p>
+      </div>
+      <ol class="steps">
+        <li><span class="tag">01</span><div><b>Tell us about the property</b>Use the form below, or map your property on the aerial.</div></li>
+        <li><span class="tag">02</span><div><b>We measure</b>From the aerial and your photos, or with a site visit where needed.</div></li>
+        <li><span class="tag">03</span><div><b>You receive a written quote</b>Scope, access, waste removal, exclusions, price, timing and how long it is valid.</div></li>
+        <li><span class="tag">04</span><div><b>Accept online</b>Accept with one link and we book the work in.</div></li>
+      </ol>
     </div>
   </section>
 
   <!-- ABOUT -->
-  <section class="about" id="about">
+  <section class="sec about" id="about">
     <div class="wrap about-in">
-      <figure class="reveal"><img src="/site/img/about.jpg" alt="Hedge foliage, close up" loading="lazy"><figcaption>Leaf / Detail</figcaption></figure>
-      <div class="reveal">
-        <p class="label">05 — About Seedsmans</p>
-        <h2>A considered approach to landscape maintenance.</h2>
-        <p>Seedsmans specialises in the care of established hedges and gardens across coastal properties.</p>
-        <p>Our approach combines skilled hedge work, reliable scheduled maintenance and an understanding of how coastal landscapes grow, weather and change.</p>
-        <p>We aim to keep gardens looking considered without making them feel over-managed.</p>
+      <figure><img src="/site/img/about.jpg" alt="Hedge foliage, close up" loading="lazy"></figure>
+      <div>
+        <p class="tag">About</p>
+        <h2>About Seedsmans</h2>
+        <p>Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula.</p>
+        <p>Coastal hedges take salt, wind and sandy soil. We cut them to suit how they grow there, keep work areas tidy and take the green waste away.</p>
+        <p>We measure before we price, so the quote matches the job.</p>
       </div>
     </div>
   </section>
 
-  <!-- CONTACT -->
-  <section class="contact" id="contact">
-    <div class="wrap contact-in">
-      <div class="contact-copy">
-        <p class="label">06 — Contact</p>
-        <h2>Discuss your property.</h2>
-        <p>Tell us about the property and what needs maintaining. We’ll measure it up and come back to you with a quote you can review and accept online.</p>
-        <a class="maplink" href="/map-your-property.html"><svg><use href="#sm-mark"/></svg><span><b>Map your property</b><small>Draw your hedges, lawns and trees on the aerial instead</small></span></a>
+  <!-- REQUEST A QUOTE -->
+  <section class="sec quote" id="quote">
+    <div class="wrap quote-in">
+      <div class="quote-copy">
+        <p class="tag">Request a quote</p>
+        <h2>Request a quote</h2>
+        <p>Tell us about the property and the work you need. We’ll measure it and send a written quote you can review and accept online.</p>
+        <a class="maplink" href="/map-your-property.html"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span><b>Map your property</b><small>Draw your hedges, lawns and trees on the aerial instead</small></span></a>
         <dl class="details">
           <div class="call-only"><dt>Phone</dt><dd><a data-call href="#"><span data-biz="phone"></span></a></dd></div>
           <div class="mail-only"><dt>Email</dt><dd><a data-mail href="#"><span data-biz="email"></span></a></dd></div>
@@ -179,15 +129,18 @@
         </dl>
       </div>
       <form class="form" id="qform" novalidate>
-        <div class="f2"><label>Name<input name="name" autocomplete="name"></label><label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel"></label></div>
+        <div class="f2"><label>Name<input name="name" autocomplete="name" required></label><label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel"></label></div>
         <label>Email<input name="email" type="email" autocomplete="email"></label>
-        <div class="f2 addr"><label class="rel">Property address<input name="address" id="addr" autocomplete="off" placeholder="Street address"><div class="suggest" id="suggest" hidden></div></label><label>Suburb<input name="suburb" id="suburb" autocomplete="address-level2"></label></div>
-        <fieldset><legend>Service</legend><div class="opts" id="svc"><button type="button" data-v="Hedge cutting">Hedge cutting</button><button type="button" data-v="Hedge reductions">Hedge reductions</button><button type="button" data-v="Estate maintenance">Estate maintenance</button><button type="button" data-v="Green waste">Green waste</button></div></fieldset>
-        <label>About the property<textarea name="message" rows="4" placeholder="Hedge types, rough lengths and heights, access, timing"></textarea></label>
-        <fieldset><legend>Photos <small>optional · up to 3</small></legend><label class="photo"><input type="file" id="photos" accept="image/*" multiple><span>Add photographs</span></label><div class="thumbs" id="thumbs"></div></fieldset>
-        <fieldset><legend>Preferred contact</legend><div class="opts one" id="contactPref"><button type="button" data-v="Call" class="on">Call</button><button type="button" data-v="Text">Text</button><button type="button" data-v="Email">Email</button></div></fieldset>
+        <div class="f2 addr"><label class="rel">Property address<input name="address" id="addr" autocomplete="off" placeholder="Street address" aria-autocomplete="list" aria-controls="suggest"><div class="suggest" id="suggest" role="listbox" hidden></div></label><label>Suburb<input name="suburb" id="suburb" autocomplete="address-level2"></label></div>
+        <fieldset><legend>Service required</legend><div class="opts" id="svc"><button type="button" aria-pressed="false" data-v="Hedge cutting">Hedge cutting</button><button type="button" aria-pressed="false" data-v="Hedge reductions">Hedge reductions</button><button type="button" aria-pressed="false" data-v="Scheduled maintenance">Scheduled maintenance</button><button type="button" aria-pressed="false" data-v="Green waste">Green waste</button></div></fieldset>
+        <label>Approximate dimensions <small>if known</small><input name="dims" placeholder="e.g. 30 m long, about 2 m high"></label>
+        <fieldset><legend>Access</legend><div class="opts" id="access"><button type="button" aria-pressed="false" data-v="Open access">Open access</button><button type="button" aria-pressed="false" data-v="Narrow side access">Narrow side access</button><button type="button" aria-pressed="false" data-v="Steep or uneven">Steep or uneven</button><button type="button" aria-pressed="false" data-v="Neighbour’s side needed">Neighbour’s side needed</button></div></fieldset>
+        <label>Anything else <small>optional</small><textarea name="message" rows="3" placeholder="Hedge types, gate codes, dogs, parking"></textarea></label>
+        <fieldset><legend>Photos <small>optional, up to 3</small></legend><label class="photo"><input type="file" id="photos" accept="image/*" multiple><span>Add photos</span></label><div class="thumbs" id="thumbs"></div></fieldset>
+        <fieldset><legend>Preferred timing</legend><div class="opts one" id="when"><button type="button" aria-pressed="false" data-v="As soon as possible">As soon as possible</button><button type="button" aria-pressed="false" data-v="Within a month">Within a month</button><button type="button" aria-pressed="false" data-v="Flexible">Flexible</button><button type="button" aria-pressed="false" data-v="Regular schedule">Regular schedule</button></div></fieldset>
+        <fieldset><legend>Preferred contact</legend><div class="opts one" id="contactPref"><button type="button" aria-pressed="true" data-v="Call" class="on">Call</button><button type="button" aria-pressed="false" data-v="Text">Text</button><button type="button" aria-pressed="false" data-v="Email">Email</button></div></fieldset>
         <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
-        <button class="btn solid wide" type="submit" id="send">Request a quote</button>
+        <button class="btn solid wide" type="submit" id="send">Request a Quote</button>
         <p class="err" id="err" role="alert"></p>
       </form>
     </div>
@@ -196,13 +149,13 @@
 
 <footer class="foot">
   <div class="wrap">
-    <div class="foot-word"><span>SEEDS</span><svg class="fline" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M1 16c6-9 12-9 18 0s12 9 18 0l3-4V7h26v5l3 4c7-6 15-8 22-4s14 6 28 2"/></svg><span>MANS</span></div>
+    <a class="lockup foot-lockup" href="#top" aria-label="Seedsmans — back to top"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span class="wm">SEEDSMANS</span><span class="desc">Coastal hedge care</span></a>
     <div class="foot-row">
-      <p>Coastal hedge &amp; garden care<br>Mornington Peninsula, Victoria</p>
+      <p>Hedge cutting, shaping and scheduled maintenance<br>Mornington Peninsula, Victoria</p>
       <p class="foot-contact"><a class="call-only" data-call href="#"><span data-biz="phone"></span></a><a class="mail-only" data-mail href="#"><span data-biz="email"></span></a><span class="abn-only">ABN <span data-biz="abn"></span></span></p>
-      <p class="foot-links"><a href="#services">Services</a><a href="#work">Work</a><a href="/map-your-property.html">Map your property</a><a href="#contact">Contact</a></p>
+      <p class="foot-links"><a href="#services">Services</a><a href="#work">Our Work</a><a href="#about">About</a><a href="#quote">Request a Quote</a><a href="/map-your-property.html">Map your property</a></p>
     </div>
-    <div class="foot-base"><span>© <span id="yr"></span> Seedsmans</span><span>38.38° S · 145.12° E</span><a href="/login.html">Staff login</a></div>
+    <div class="foot-base"><span>© <span id="yr"></span> Seedsmans</span><a href="/login.html">Staff login</a></div>
   </div>
 </footer>
 
