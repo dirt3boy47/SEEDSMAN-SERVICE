@@ -82,8 +82,11 @@ small { font-size: .85em; }
 .lockup-name .desc { font-size: .36em; }
 .hero-line { max-width: 34em; margin-top: 26px; color: var(--muted); font-size: clamp(16.5px, 1.6vw, 18.5px); }
 .hero-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
-.hero-photo { margin: clamp(40px, 6vw, 72px) var(--gutter) 0; aspect-ratio: 16 / 9; overflow: hidden; background: var(--dune); }
-.hero-photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 72%; }
+/* the photograph runs edge to edge and fades up into the cream (and softly at its foot), so there is no hard line */
+.hero-photo { margin: clamp(8px, 2vw, 28px) 0 0; aspect-ratio: 16 / 8; overflow: hidden; }
+.hero-photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 62%;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, .35) 12%, rgba(0, 0, 0, .8) 26%, #000 40%, #000 95%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, .35) 12%, rgba(0, 0, 0, .8) 26%, #000 40%, #000 95%, transparent 100%); }
 
 /* ---------- sections: large photography, cream framing, fine rules, short uppercase labels ---------- */
 .sec { padding: clamp(72px, 10vw, 120px) 0; }
@@ -203,7 +206,7 @@ small { font-size: .85em; }
   :root { --gutter: 16px; }
   .svc-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
   .svc figure { aspect-ratio: 3 / 2; }
-  .hero-photo { aspect-ratio: 4 / 3; }
+  .hero-photo { aspect-ratio: 4 / 3; margin-top: 4px; }
   .hero-cta .btn { flex: 1 1 100%; }
   .f2, .f2.addr { grid-template-columns: minmax(0, 1fr); }
   .foot-base { flex-direction: column; gap: 14px; }
