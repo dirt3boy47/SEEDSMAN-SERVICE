@@ -11,6 +11,8 @@ const JOB_STATUSES = ['Scheduled', 'In progress', 'Completed', 'Cancelled'];
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // the homepage: text and photos edited in Settings › Edit website are put in as it is served (?original=1 = as built)
+    if (url.pathname === '/' && (request.method === 'GET' || request.method === 'HEAD') && !url.searchParams.has('original')) return siteHome(request, env);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     let res;
     try {
@@ -109,7 +111,7 @@ async function activeRates(env) {
 async function api(request, env, url) {
   const parts = url.pathname.split('/').filter(Boolean).slice(1);
   const m = request.method;
-  const isUpload = m === 'POST' && ((parts[0] === 'jobs' && parts[2] === 'photos') || (parts[0] === 'public' && parts[1] === 'enquiry' && parts[3] === 'photo')); // raw image body
+  const isUpload = m === 'POST' && ((parts[0] === 'jobs' && parts[2] === 'photos') || (parts[0] === 'public' && parts[1] === 'enquiry' && parts[3] === 'photo') || (parts[0] === 'website' && parts[1] === 'image')); // raw image body
   const body = !isUpload && (m === 'POST' || m === 'PUT') ? await request.json().catch(() => ({})) : {};
 
   if (parts[0] === 'auth' && parts[1] === 'login' && m === 'POST') {
@@ -138,6 +140,7 @@ async function api(request, env, url) {
       if (id === 'password' && m === 'POST') return changePassword(env, me, body);
       break;
     case 'business': if (m === 'PUT') return saveBusiness(env, me, body); break;
+    case 'website': return websiteApi(request, env, me, m, parts, body);
     case 'rates': return ratesApi(env, me, m, body);
     case 'users': return usersApi(env, me, m, body);
     case 'dashboard': if (m === 'GET') return dashboard(env); break;
@@ -533,6 +536,97 @@ async function publicEnquiryPhoto(request, env, lid, t) {
     leadEvent(env, lid, 'photo', 'Customer added a photo', null)]);
   return json({ ok: true });
 }
+// ---------------- website content (Settings › Edit website) ----------------
+// Saved as business_settings 'website': { text: { 'hero.line': '…' }, images: { hero: { key, alt } } }. Only what was
+// changed is stored; everything else stays as built in public/index.html. Photos live in R2 under website/.
+const SITE_KEY = /^[a-z][a-z0-9]{0,15}(\.[a-z0-9]{1,15})?$/;
+async function websiteContent(env) {
+  const row = await env.DB.prepare("SELECT value FROM business_settings WHERE id = 'website'").first();
+  const w = parseJson(row && row.value, {});
+  return { text: w.text && typeof w.text === 'object' ? w.text : {}, images: w.images && typeof w.images === 'object' ? w.images : {} };
+}
+async function saveWebsite(env, w) {
+  await env.DB.prepare("INSERT INTO business_settings (id, value, updated_at) VALUES ('website', ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(w)).run();
+}
+const mediaUrl = (key) => '/api/public/media/' + String(key).replace(/^website\//, '');
+function websiteOut(w) {
+  const images = {};
+  Object.keys(w.images).forEach((k) => { const im = w.images[k] || {}; images[k] = { url: im.key ? mediaUrl(im.key) : '', alt: im.alt || '' }; });
+  return { text: w.text, images };
+}
+async function websiteApi(request, env, me, m, parts, body) {
+  if (m === 'GET' && !parts[1]) return json(websiteOut(await websiteContent(env)));
+  if (!isAdmin(me)) fail(403, 'Only an admin can change the website.');
+  const w = await websiteContent(env);
+  if (m === 'PUT' && !parts[1]) {
+    const text = body.text && typeof body.text === 'object' ? body.text : {}, alt = body.alt && typeof body.alt === 'object' ? body.alt : {};
+    Object.keys(text).slice(0, 200).forEach((k) => {
+      if (!SITE_KEY.test(k)) return;
+      const v = String(text[k] == null ? '' : text[k]).replace(/\r/g, '').trim().slice(0, 1500);
+      if (v) w.text[k] = v; else delete w.text[k]; // empty = back to the original wording
+    });
+    Object.keys(alt).slice(0, 50).forEach((k) => {
+      if (!SITE_KEY.test(k)) return;
+      const v = str(alt[k], 300), im = w.images[k] || {};
+      if (v) im.alt = v; else delete im.alt;
+      if (im.key || im.alt) w.images[k] = im; else delete w.images[k];
+    });
+    await saveWebsite(env, w);
+    await audit(env, me, 'website', 'website', 'update', { text: Object.keys(text), alt: Object.keys(alt) });
+    return json(websiteOut(w));
+  }
+  const slot = parts[2];
+  if (parts[1] === 'image' && slot && SITE_KEY.test(slot) && slot.indexOf('.') < 0) {
+    if (!env.PHOTOS) fail(500, 'Photo storage is not connected.');
+    const old = (w.images[slot] || {}).key;
+    if (m === 'POST') {
+      const type = (request.headers.get('Content-Type') || '').split(';')[0];
+      if (!/^image\/(jpeg|png|webp)$/.test(type)) fail(400, 'Use a JPEG, PNG or WebP photo.');
+      const buf = await request.arrayBuffer();
+      if (!buf.byteLength || buf.byteLength > 10 * 1024 * 1024) fail(413, 'That photo is too big (10 MB at most).');
+      const key = 'website/' + slot + '-' + randHex(6) + (type === 'image/png' ? '.png' : type === 'image/webp' ? '.webp' : '.jpg');
+      await env.PHOTOS.put(key, buf, { httpMetadata: { contentType: type } });
+      w.images[slot] = Object.assign({}, w.images[slot], { key });
+    } else if (m === 'DELETE') {
+      if (w.images[slot]) { delete w.images[slot].key; if (!w.images[slot].alt) delete w.images[slot]; }
+    } else fail(405, 'Not allowed.');
+    await saveWebsite(env, w);
+    if (old && old !== (w.images[slot] || {}).key) await env.PHOTOS.delete(old).catch(() => {});
+    await audit(env, me, 'website', slot, m === 'POST' ? 'photo' : 'photo-reset', {});
+    return json(websiteOut(w));
+  }
+  fail(404, 'Not found.');
+}
+/** Website photos are public (they are on the homepage); only the website/ folder of the bucket is reachable. */
+async function websiteMedia(env, name) {
+  if (!/^[a-z0-9]+-[0-9a-f]{12}\.(jpg|png|webp)$/.test(name) || !env.PHOTOS) fail(404, 'Not found.');
+  const obj = await env.PHOTOS.get('website/' + name);
+  if (!obj) fail(404, 'Not found.');
+  return new Response(obj.body, { headers: { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+}
+function siteHtml(v) { return String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])).replace(/\n/g, '<br>'); }
+async function siteHome(request, env) {
+  const res = await env.ASSETS.fetch(request);
+  if (!res.ok || !/text\/html/.test(res.headers.get('Content-Type') || '')) return res;
+  let w;
+  try { w = await websiteContent(env); } catch (e) { return res; } // never let a database hiccup take the homepage down
+  if (!Object.keys(w.text).length && !Object.keys(w.images).length) return res;
+  const out = new HTMLRewriter()
+    .on('[data-edit]', { element(el) {
+      const v = w.text[el.getAttribute('data-edit')]; if (v == null) return;
+      if (el.tagName === 'meta') el.setAttribute('content', v); else el.setInnerContent(siteHtml(v), { html: true });
+    } })
+    .on('img[data-img]', { element(el) {
+      const im = w.images[el.getAttribute('data-img')]; if (!im) return;
+      if (im.key) el.setAttribute('src', mediaUrl(im.key));
+      if (im.alt) el.setAttribute('alt', im.alt);
+    } })
+    .transform(res);
+  const r = new Response(out.body, out);
+  r.headers.delete('ETag'); r.headers.set('Cache-Control', 'no-cache');
+  return r;
+}
+
 /** What the public website shows: business details and the services offered (no prices). */
 async function publicBusiness(env) {
   const b = await business(env), r = await activeRates(env), pub = {};
@@ -995,6 +1089,7 @@ async function publicApi(request, env, parts, url, m, body) {
   if (parts[1] === 'enquiry' && parts[2] && parts[3] === 'photo' && m === 'POST') return publicEnquiryPhoto(request, env, parts[2], url.searchParams.get('t'));
   if (parts[1] === 'enquiry' && m === 'POST') return publicEnquiry(request, env, body);
   if (parts[1] === 'business' && m === 'GET') return publicBusiness(env);
+  if (parts[1] === 'media' && parts[2] && m === 'GET') return websiteMedia(env, parts[2]);
   if (parts[1] !== 'quote') fail(404, 'Not found.');
   if (!parts[2] && m === 'GET') {
     const q = await quoteFromRef(env, url.searchParams.get('ref'));

@@ -4,7 +4,7 @@
   "name": "seedsmans",
   "main": "worker/index.js",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/"] },
   "d1_databases": [
     { "binding": "DB", "database_name": "seedsmans", "database_id": "0248c54b-71a1-4777-9098-c2e1e2c97034", "migrations_dir": "migrations" }
   ],

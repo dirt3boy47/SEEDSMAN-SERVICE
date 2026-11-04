@@ -41,6 +41,7 @@
     grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
     funnel: '<path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/>',
     truck: '<path d="M3 6h11v10H3zM14 9h4l3 3.5V16h-7"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
+    globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z"/>',
     camera: '<path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h3L9 5h6l1.5 2h3A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/>'
   };
   function icon(name) { return '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (P[name] || '') + '</svg>'; }
@@ -138,7 +139,7 @@
   var NAV = [
     { g: 'Work' }, { id: 'overview', href: '#/', icon: 'overview', label: 'Overview' }, { id: 'pipeline', href: '#/pipeline', icon: 'funnel', label: 'Pipeline' }, { id: 'quotes', href: '#/quotes', icon: 'quote', label: 'Quotes' }, { id: 'schedule', href: '#/schedule', icon: 'calendar', label: 'Schedule' },
     { g: 'Records' }, { id: 'customers', href: '#/customers', icon: 'users', label: 'Customers' }, { id: 'properties', href: '#/properties', icon: 'home', label: 'Properties' }, { id: 'map', href: '#/map', icon: 'layers', label: 'Map' },
-    { g: 'Business' }, { id: 'services', href: '#/services', icon: 'tag', label: 'Services & pricing' }, { id: 'reports', href: '#/reports', icon: 'chart', label: 'Reports' }, { id: 'settings', href: '#/settings', icon: 'gear', label: 'Settings' }
+    { g: 'Business' }, { id: 'services', href: '#/services', icon: 'tag', label: 'Services & pricing' }, { id: 'reports', href: '#/reports', icon: 'chart', label: 'Reports' }, { id: 'website', href: '#/website', icon: 'globe', label: 'Edit website' }, { id: 'settings', href: '#/settings', icon: 'gear', label: 'Settings' }
   ];
   function shell(me) {
     document.getElementById('side').innerHTML =

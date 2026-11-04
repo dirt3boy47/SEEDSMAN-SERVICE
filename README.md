@@ -81,6 +81,12 @@ quote. The shapes travel with the enquiry and **Start a quote** saves them on th
 and pruning services with their settings), so they appear under "Saved on this property" in the new quote, priced. Both forms post to the existing `/api/public/enquiry` (and photo) endpoints, so each enquiry
 lands in the Pipeline as a New enquiry from the website — the property pin as its location and the traced hedges, lengths
 and details in its notes. Phone, email and ABN come from Settings › Business details. Staff app: `/app/`.
+**Edit website** (staff app › Edit website, or Settings › Website; admins only): every text block marked `data-edit`
+and photo marked `data-img` in `public/index.html` is listed by section with **Reset to original**. Changes are stored in
+`business_settings` row `website` (only what differs from the built page); new photos are shrunk on the device and stored
+in R2 under `website/`, served from `/api/public/media/`. The Worker runs first for `/` (`assets.run_worker_first`) and
+puts the saved text and photos into the page as it is served (HTMLRewriter; `/?original=1` returns the page as built).
+The logo, menu and quote form are not editable (brand guidelines).
 Photographs in `public/site/img/` are generated placeholders — replace each with real photography of the same name
 (hero 2400×1500; aerial 2000×1400; others 1600×1100). The Selected properties entries are placeholders too.
 

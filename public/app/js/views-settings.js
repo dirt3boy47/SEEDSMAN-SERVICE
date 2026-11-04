@@ -109,6 +109,7 @@
           '<div class="full"><button class="btn primary" id="b-save">' + icon('save') + 'Save business details</button></div></div></div>' +
         '<div class="card"><div class="card-h"><h2>Staff logins</h2></div><div id="users"></div><div class="card-b grid4" id="u-form"><label class="field">Name<input id="u-name"></label><label class="field">Email<input id="u-email" type="email"></label><label class="field">Password (8+)<input id="u-pw"></label><label class="field">Role<select id="u-role"><option value="field">Staff</option><option value="admin">Admin</option></select></label><div class="full"><button class="btn" id="u-add">' + icon('plus') + 'Add login</button></div></div></div>' +
         '</div><div class="stack">' +
+        '<div class="card"><div class="card-h"><h2>Website</h2></div><div class="card-b"><p class="muted small" style="margin-top:0">Change the wording and photos on your public homepage.</p><a class="btn" href="#/website">' + icon('globe') + 'Edit website</a></div></div>' +
         '<div class="card"><div class="card-h"><h2>Appearance</h2></div><div class="card-b"><div class="seg" id="theme">' + [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(function (t) { return '<button type="button" data-t="' + t[0] + '"' + (t[0] === theme ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><p class="muted small">Automatic follows the device, like GeoCanvas.</p></div></div>' +
         '<div class="card"><div class="card-h"><h2>Map imagery</h2></div><div class="card-b stack"><p class="muted small" style="margin:0">For the sharpest, most recent aerial photos of Victoria, add a Nearmap or MetroMap subscription key, or a Google key for Google satellite. Only signed-in staff use it; customers never see it. Restrict the key to this website’s address in your Nearmap / MetroMap account.</p>' +
           '<label class="field">Google Maps key for satellite (Map Tiles API)<input id="im-gg" type="password" autocomplete="off" value="' + esc(im.googleKey || '') + '" placeholder="Restrict it to this website in Google Cloud"></label>' +
@@ -182,5 +183,111 @@
       $('u-add').onclick = function () { App.post('users', { name: $('u-name').value, email: $('u-email').value, password: $('u-pw').value, role: $('u-role').value }).then(function () { App.toast('Login added. Give them the email and password.'); ['u-name', 'u-email', 'u-pw'].forEach(function (k) { $(k).value = ''; }); users(); }).catch(function (x) { App.toast(x.message, 'err'); }); };
       users();
     });
+  });
+  // ======================= edit website =======================
+  /* The text blocks and photos on the public homepage. The editable items are read from the page itself (elements marked
+     data-edit / data-img in public/index.html, fetched as built with ?original=1), so a new block on the page shows up
+     here by itself. Only changes are saved; "Reset to original" goes back to the wording or photo the page was built with. */
+  function siteText(el) {
+    if (el.tagName === 'META') return (el.getAttribute('content') || '').trim();
+    var c = el.cloneNode(true);
+    c.querySelectorAll('br').forEach(function (b) { b.replaceWith('\n'); });
+    return c.textContent.split('\n').map(function (s) { return s.replace(/\s+/g, ' ').trim(); }).join('\n').trim();
+  }
+  function shrinkSite(file) {
+    return new Promise(function (res) {
+      var img = new Image(), url = URL.createObjectURL(file);
+      img.onload = function () {
+        var k = Math.min(1, 2400 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        c.toBlob(function (b) { res(b ? { blob: b, w: c.width, h: c.height } : null); }, 'image/jpeg', 0.84);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); res(null); };
+      img.src = url;
+    });
+  }
+  App.route('/website', 'website', function (ctx) {
+    App.setTop({ title: 'Edit website', sub: 'The text and photos on your public homepage' });
+    ctx.el.innerHTML = '<div class="page"><div class="empty">Loading the website…</div></div>';
+    Promise.all([App.refreshMe(), App.get('website'), fetch('/?original=1', { cache: 'no-store' }).then(function (r) { return r.text(); })]).then(function (r) {
+      var me = r[0], cur = r[1], doc = new DOMParser().parseFromString(r[2], 'text/html'), admin = me.user.role !== 'field';
+      var groups = Array.prototype.slice.call(doc.querySelectorAll('[data-name]')).map(function (g) {
+        return { name: g.getAttribute('data-name'), head: g.tagName === 'HEAD', items: Array.prototype.slice.call(g.querySelectorAll('[data-edit], img[data-img]')) };
+      }).filter(function (g) { return g.items.length; });
+      groups.sort(function (a, b) { return (a.head ? 1 : 0) - (b.head ? 1 : 0); }); // search engines last
+      var defs = { text: {}, alt: {}, src: {} };
+      var field = function (el) {
+        var k = el.getAttribute('data-edit'), def = siteText(el), v = cur.text[k] != null ? cur.text[k] : def, multi = def.length > 60 || def.indexOf('\n') >= 0;
+        defs.text[k] = def;
+        var box = multi ? '<textarea data-k="' + esc(k) + '" rows="' + Math.min(6, Math.max(2, Math.ceil(def.length / 70) + (def.split('\n').length - 1))) + '"' + (admin ? '' : ' disabled') + '>' + esc(v) + '</textarea>'
+          : '<input data-k="' + esc(k) + '" value="' + esc(v) + '"' + (admin ? '' : ' disabled') + '>';
+        return '<div class="we-f" data-wrap="' + esc(k) + '"><label class="field"><span class="we-l">' + esc(el.getAttribute('data-label') || k) + '<span class="tag we-ed">Edited</span></span>' + box + '</label>' +
+          (admin ? '<button type="button" class="link we-reset" data-reset="' + esc(k) + '">Reset to original</button>' : '') + '</div>';
+      };
+      var photo = function (el) {
+        var s = el.getAttribute('data-img'), im = cur.images[s] || {};
+        defs.alt[s] = el.getAttribute('alt') || ''; defs.src[s] = el.getAttribute('src');
+        return '<div class="we-img" data-slot="' + esc(s) + '"><div class="we-thumb" style="background-image:url(\'' + esc(im.url || defs.src[s]) + '\')"></div><div class="we-ib">' +
+          '<b>' + esc(el.getAttribute('data-label') || s) + ' <span class="tag we-own">Your photo</span></b><small class="muted">' + esc(el.getAttribute('data-hint') || '') + '</small>' +
+          (admin ? '<div class="row"><label class="btn sm">' + icon('camera') + 'Replace photo<input type="file" accept="image/*" hidden data-up="' + esc(s) + '"></label><button type="button" class="btn sm ghost we-orig" data-orig="' + esc(s) + '">Use original</button></div>' : '') +
+          '<label class="field">Photo description <span class="muted small">for screen readers and Google</span><input data-alt="' + esc(s) + '" value="' + esc(im.alt || defs.alt[s]) + '"' + (admin ? '' : ' disabled') + '></label></div></div>';
+      };
+      ctx.el.innerHTML = '<div class="page we">' +
+        '<div class="card"><div class="card-b we-intro"><p class="muted small" style="margin:0">Change the wording and photos on <a href="/" target="_blank" rel="noopener">your website</a>. Text changes go live when you tap <b>Save changes</b>; a new photo goes live as soon as it uploads. The logo, menu and quote form stay as they are — the brand guidelines keep those fixed.' +
+          (admin ? '' : ' <b>Only an admin can make changes.</b>') + '</p><p class="muted small" style="margin:8px 0 0">Keep headings short. Write like you talk to a customer: what you do, plainly — the brand guide says no luxury claims or promises you can’t back up. Use photos of your own work, with the owner’s OK.</p></div></div>' +
+        groups.map(function (g) {
+          return '<div class="card"><div class="card-h"><h2>' + esc(g.name) + '</h2></div><div class="card-b we-items">' + g.items.map(function (el) { return el.hasAttribute('data-img') ? photo(el) : field(el); }).join('') + '</div></div>';
+        }).join('') +
+        (admin ? '<div class="we-bar"><span class="muted small" id="we-state">No changes</span><a class="btn" href="/" target="_blank" rel="noopener">View website</a><button class="btn primary" id="we-save" disabled>' + icon('save') + 'Save changes</button></div>' : '') +
+        '</div>';
+      var q = function (s) { return ctx.el.querySelector(s); }, qa = function (s) { return Array.prototype.slice.call(ctx.el.querySelectorAll(s)); };
+      function paint() {
+        var dirty = 0;
+        qa('[data-k]').forEach(function (i) {
+          var k = i.getAttribute('data-k'), v = i.value.trim(), saved = cur.text[k] != null ? cur.text[k] : defs.text[k], w = q('[data-wrap="' + k + '"]');
+          w.classList.toggle('edited', v !== defs.text[k]); if (v !== saved) dirty++;
+        });
+        qa('[data-alt]').forEach(function (i) { var s = i.getAttribute('data-alt'), saved = (cur.images[s] || {}).alt || defs.alt[s]; if (i.value.trim() !== saved) dirty++; });
+        qa('.we-img').forEach(function (b) { b.classList.toggle('own', !!(cur.images[b.getAttribute('data-slot')] || {}).url); });
+        if (q('#we-save')) { q('#we-save').disabled = !dirty; q('#we-state').textContent = dirty ? dirty + ' unsaved change' + (dirty === 1 ? '' : 's') : 'All changes saved'; }
+        ctx.dirty = dirty;
+      }
+      paint();
+      if (!admin) return;
+      ctx.el.addEventListener('input', paint);
+      ctx.el.addEventListener('click', function (e) {
+        var rs = e.target.closest('[data-reset]');
+        if (rs) { var i = q('[data-k="' + rs.getAttribute('data-reset') + '"]'); i.value = defs.text[rs.getAttribute('data-reset')]; paint(); i.focus(); return; }
+        var o = e.target.closest('[data-orig]');
+        if (o) {
+          var s = o.getAttribute('data-orig');
+          App.del('website/image/' + encodeURIComponent(s)).then(function (d) { cur.images = d.images; q('[data-slot="' + s + '"] .we-thumb').style.backgroundImage = 'url(\'' + defs.src[s] + '\')'; paint(); App.toast('Back to the original photo.'); }).catch(function (x) { App.toast(x.message, 'err'); });
+        }
+      });
+      ctx.el.addEventListener('change', function (e) {
+        var up = e.target.closest('[data-up]'); if (!up || !up.files[0]) return;
+        var s = up.getAttribute('data-up'), file = up.files[0], box = q('[data-slot="' + s + '"]');
+        box.classList.add('busy');
+        shrinkSite(file).then(function (p) {
+          if (!p) throw new Error('That file could not be read as a photo. Try a JPEG or PNG.');
+          if (Math.max(p.w, p.h) < 1200) App.toast('That photo is small (' + p.w + ' × ' + p.h + ') — it may look soft on big screens.', 'warn');
+          return fetch('/api/website/image/' + encodeURIComponent(s), { method: 'POST', headers: { Authorization: 'Bearer ' + App.token(), 'Content-Type': 'image/jpeg' }, body: p.blob })
+            .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Upload failed'); return d; }); });
+        }).then(function (d) {
+          cur.images = d.images; box.querySelector('.we-thumb').style.backgroundImage = 'url(\'' + d.images[s].url + '\')'; paint();
+          App.toast('Photo replaced — it’s on the website now.');
+        }).catch(function (x) { App.toast(x.message, 'err'); }).then(function () { box.classList.remove('busy'); up.value = ''; });
+      });
+      q('#we-save').onclick = function () {
+        var text = {}, alt = {};
+        qa('[data-k]').forEach(function (i) { var k = i.getAttribute('data-k'), v = i.value.trim(); text[k] = v === defs.text[k] ? '' : v; });
+        qa('[data-alt]').forEach(function (i) { var s = i.getAttribute('data-alt'), v = i.value.trim(); alt[s] = v === defs.alt[s] ? '' : v; });
+        var empty = qa('[data-k]').filter(function (i) { return !i.value.trim(); });
+        if (empty.length) { empty.forEach(function (i) { i.value = defs.text[i.getAttribute('data-k')]; }); App.toast('Empty boxes were put back to the original wording.', 'warn'); }
+        q('#we-save').disabled = true;
+        App.put('website', { text: text, alt: alt }).then(function (d) { cur = d; paint(); App.toast('Saved — the website shows it now.'); }).catch(function (x) { App.toast(x.message, 'err'); paint(); });
+      };
+    }).catch(function (x) { ctx.el.innerHTML = '<div class="page"><div class="empty">' + esc(x.message) + '</div></div>'; });
   });
 })();

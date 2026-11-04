@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="en-AU">
-<head>
+<head data-name="Search engines">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#243C35">
 <title>Seedsmans — Coastal Hedge Care</title>
-<meta name="description" content="Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula. Request a quote online.">
+<meta name="description" data-edit="seo.description" data-label="Google description (shown under the link in search results)" content="Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula. Request a quote online.">
 <meta property="og:title" content="Seedsmans — Coastal hedge care">
 <meta property="og:description" content="Hedge cutting, hedge reductions, scheduled maintenance and green waste removal on the Mornington Peninsula.">
 <meta property="og:type" content="website">
@@ -20,6 +20,8 @@
 </script>
 </head>
 <body>
+<!-- Text marked data-edit and photos marked data-img can be changed in the staff app (Settings › Edit website); the Worker
+     puts the saved versions in as the page is served. The logo is not editable (brand guidelines: one approved master). -->
 <!-- The Seedsmans contour (brand guidelines V2.0): one approved master path, scaled uniformly, never redrawn.
      Master files: /site/brand/contour-green.svg and /site/brand/contour-cream.svg -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -38,89 +40,89 @@
 
 <main id="main">
   <!-- HERO: contour-led, supporting name, hedge photograph, Request a quote -->
-  <section class="hero" id="top">
+  <section class="hero" id="top" data-name="Top of the page">
     <div class="hero-mark">
       <svg class="contour hero-contour" role="img" aria-label="Seedsmans contour"><use href="#contour"/></svg>
       <h1 class="lockup-name"><span class="wm">SEEDSMANS</span><span class="desc">Coastal hedge care</span></h1>
-      <p class="hero-line">Hedge cutting, shaping and scheduled maintenance for coastal properties on the Mornington Peninsula.</p>
+      <p class="hero-line" data-edit="hero.line" data-label="Intro line">Hedge cutting, shaping and scheduled maintenance for coastal properties on the Mornington Peninsula.</p>
       <div class="hero-cta"><a class="btn solid" href="#quote">Request a Quote</a><a class="btn line" href="#work">Our Work</a></div>
     </div>
     <!-- Placeholder image: replace with an authorised photograph of finished Seedsmans hedge work before launch. -->
-    <figure class="hero-photo"><img src="/site/img/hero.jpg" alt="A clipped hedge on a coastal property, with the bay behind" fetchpriority="high"></figure>
+    <figure class="hero-photo"><img data-img="hero" data-label="Main photo" data-hint="Landscape, at least 2400 px wide — the hedge near the middle" src="/site/img/hero.jpg" alt="A clipped hedge on a coastal property, with the bay behind" fetchpriority="high"></figure>
   </section>
 
   <!-- SERVICES -->
-  <section class="sec services" id="services">
+  <section class="sec services" id="services" data-name="Services">
     <div class="wrap">
-      <div class="sec-head"><p class="tag">Services</p><h2>What we do</h2></div>
+      <div class="sec-head"><p class="tag">Services</p><h2 data-edit="services.title" data-label="Heading">What we do</h2></div>
       <div class="svc-grid">
-        <article class="svc"><figure><img src="/site/img/svc-hedge-cutting.jpg" alt="A long clipped hedge beside a gravel path" loading="lazy"></figure>
-          <h3>Hedge cutting</h3><p>Routine and one-off cutting of established hedges. Tops and faces cut to a clean, even line.</p></article>
-        <article class="svc"><figure><img src="/site/img/svc-reductions.jpg" alt="A tall hedge being cut back" loading="lazy"></figure>
-          <h3>Hedge reductions</h3><p>Overgrown hedges reduced in height and width, and shaped back into a line you can maintain.</p></article>
-        <article class="svc"><figure><img src="/site/img/svc-estate.jpg" alt="Hedging along a driveway on a larger property" loading="lazy"></figure>
-          <h3>Scheduled maintenance</h3><p>Regular visits through the year so hedges and garden edges stay at the height and shape you want.</p></article>
-        <article class="svc"><figure><img src="/site/img/svc-green-waste.jpg" alt="Hedge clippings collected for removal" loading="lazy"></figure>
-          <h3>Green waste</h3><p>Clippings and cuttings collected and taken away. We leave the site raked and tidy.</p></article>
+        <article class="svc"><figure><img data-img="svc1" data-label="Service 1 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/svc-hedge-cutting.jpg" alt="A long clipped hedge beside a gravel path" loading="lazy"></figure>
+          <h3 data-edit="svc1.title" data-label="Service 1 name">Hedge cutting</h3><p data-edit="svc1.text" data-label="Service 1 description">Routine and one-off cutting of established hedges. Tops and faces cut to a clean, even line.</p></article>
+        <article class="svc"><figure><img data-img="svc2" data-label="Service 2 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/svc-reductions.jpg" alt="A tall hedge being cut back" loading="lazy"></figure>
+          <h3 data-edit="svc2.title" data-label="Service 2 name">Hedge reductions</h3><p data-edit="svc2.text" data-label="Service 2 description">Overgrown hedges reduced in height and width, and shaped back into a line you can maintain.</p></article>
+        <article class="svc"><figure><img data-img="svc3" data-label="Service 3 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/svc-estate.jpg" alt="Hedging along a driveway on a larger property" loading="lazy"></figure>
+          <h3 data-edit="svc3.title" data-label="Service 3 name">Scheduled maintenance</h3><p data-edit="svc3.text" data-label="Service 3 description">Regular visits through the year so hedges and garden edges stay at the height and shape you want.</p></article>
+        <article class="svc"><figure><img data-img="svc4" data-label="Service 4 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/svc-green-waste.jpg" alt="Hedge clippings collected for removal" loading="lazy"></figure>
+          <h3 data-edit="svc4.title" data-label="Service 4 name">Green waste</h3><p data-edit="svc4.text" data-label="Service 4 description">Clippings and cuttings collected and taken away. We leave the site raked and tidy.</p></article>
       </div>
     </div>
   </section>
 
   <!-- OUR WORK -->
-  <section class="sec work" id="work">
+  <section class="sec work" id="work" data-name="Our work">
     <div class="wrap">
-      <div class="sec-head"><p class="tag">Selected work</p><h2>Our work</h2></div>
+      <div class="sec-head"><p class="tag">Selected work</p><h2 data-edit="work.title" data-label="Heading">Our work</h2></div>
       <!-- Placeholder images: replace with genuine, authorised Seedsmans projects (with the owners' permission) before launch.
            Captions describe the work only — no invented locations or quantities. -->
       <div class="projects">
-        <figure class="proj p1"><img src="/site/img/work-01.jpg" alt="A coastal property with clipped hedging" loading="lazy"><figcaption><span class="tag">Hedge cutting</span>Boundary hedges cut to a level top</figcaption></figure>
-        <figure class="proj p2"><img src="/site/img/work-02.jpg" alt="A clifftop property with a reduced hedge" loading="lazy"><figcaption><span class="tag">Hedge reduction</span>Height brought down, screen kept</figcaption></figure>
-        <figure class="proj p3"><img src="/site/img/work-03.jpg" alt="A long hedge line beside a path" loading="lazy"><figcaption><span class="tag">Scheduled maintenance</span>Seasonal visits through the year</figcaption></figure>
-        <figure class="proj p4"><img src="/site/img/work-04.jpg" alt="A clipped hedge in a coastal garden" loading="lazy"><figcaption><span class="tag">Hedge shaping</span>Faces and corners squared up</figcaption></figure>
+        <figure class="proj p1"><img data-img="work1" data-label="Project 1 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/work-01.jpg" alt="A coastal property with clipped hedging" loading="lazy"><figcaption><span class="tag" data-edit="work1.tag" data-label="Project 1 label">Hedge cutting</span><span data-edit="work1.caption" data-label="Project 1 caption">Boundary hedges cut to a level top</span></figcaption></figure>
+        <figure class="proj p2"><img data-img="work2" data-label="Project 2 photo" data-hint="Portrait or square works best" src="/site/img/work-02.jpg" alt="A clifftop property with a reduced hedge" loading="lazy"><figcaption><span class="tag" data-edit="work2.tag" data-label="Project 2 label">Hedge reduction</span><span data-edit="work2.caption" data-label="Project 2 caption">Height brought down, screen kept</span></figcaption></figure>
+        <figure class="proj p3"><img data-img="work3" data-label="Project 3 photo" data-hint="Portrait or square works best" src="/site/img/work-03.jpg" alt="A long hedge line beside a path" loading="lazy"><figcaption><span class="tag" data-edit="work3.tag" data-label="Project 3 label">Scheduled maintenance</span><span data-edit="work3.caption" data-label="Project 3 caption">Seasonal visits through the year</span></figcaption></figure>
+        <figure class="proj p4"><img data-img="work4" data-label="Project 4 photo" data-hint="Landscape, at least 1600 px wide" src="/site/img/work-04.jpg" alt="A clipped hedge in a coastal garden" loading="lazy"><figcaption><span class="tag" data-edit="work4.tag" data-label="Project 4 label">Hedge shaping</span><span data-edit="work4.caption" data-label="Project 4 caption">Faces and corners squared up</span></figcaption></figure>
       </div>
     </div>
   </section>
 
   <!-- PROCESS -->
-  <section class="sec process" id="process">
+  <section class="sec process" id="process" data-name="How quoting works">
     <div class="wrap process-in">
       <div>
         <p class="tag light">How quoting works</p>
-        <h2>From enquiry<br>to booked work</h2>
-        <p class="process-lede">Every quote is based on the actual hedges at your property, measured before we price.</p>
+        <h2 data-edit="process.title" data-label="Heading">From enquiry<br>to booked work</h2>
+        <p class="process-lede" data-edit="process.lede" data-label="Intro">Every quote is based on the actual hedges at your property, measured before we price.</p>
         <a class="btn solid cream" href="/map-your-property.html">Map your property</a>
-        <p class="process-note">Prefer to draw it yourself? Find your property on the aerial and mark the hedges, lawns and trees.</p>
+        <p class="process-note" data-edit="process.note" data-label="Map your property note">Prefer to draw it yourself? Find your property on the aerial and mark the hedges, lawns and trees.</p>
       </div>
       <ol class="steps">
-        <li><span class="tag">01</span><div><b>Tell us about the property</b>Use the form below, or map your property on the aerial.</div></li>
-        <li><span class="tag">02</span><div><b>We measure</b>From the aerial and your photos, or with a site visit where needed.</div></li>
-        <li><span class="tag">03</span><div><b>You receive a written quote</b>Scope, access, waste removal, exclusions, price, timing and how long it is valid.</div></li>
-        <li><span class="tag">04</span><div><b>Accept online</b>Accept with one link and we book the work in.</div></li>
+        <li><span class="tag">01</span><div><b data-edit="step1.title" data-label="Step 1">Tell us about the property</b><span data-edit="step1.text" data-label="Step 1 detail">Use the form below, or map your property on the aerial.</span></div></li>
+        <li><span class="tag">02</span><div><b data-edit="step2.title" data-label="Step 2">We measure</b><span data-edit="step2.text" data-label="Step 2 detail">From the aerial and your photos, or with a site visit where needed.</span></div></li>
+        <li><span class="tag">03</span><div><b data-edit="step3.title" data-label="Step 3">You receive a written quote</b><span data-edit="step3.text" data-label="Step 3 detail">Scope, access, waste removal, exclusions, price, timing and how long it is valid.</span></div></li>
+        <li><span class="tag">04</span><div><b data-edit="step4.title" data-label="Step 4">Accept online</b><span data-edit="step4.text" data-label="Step 4 detail">Accept with one link and we book the work in.</span></div></li>
       </ol>
     </div>
   </section>
 
   <!-- ABOUT -->
-  <section class="sec about" id="about">
+  <section class="sec about" id="about" data-name="About">
     <div class="wrap about-in">
-      <figure><img src="/site/img/about.jpg" alt="Hedge foliage, close up" loading="lazy"></figure>
+      <figure><img data-img="about" data-label="About photo" data-hint="Portrait works best — foliage or the crew at work" src="/site/img/about.jpg" alt="Hedge foliage, close up" loading="lazy"></figure>
       <div>
         <p class="tag">About</p>
-        <h2>About Seedsmans</h2>
-        <p>Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula.</p>
-        <p>Coastal hedges take salt, wind and sandy soil. We cut them to suit how they grow there, keep work areas tidy and take the green waste away.</p>
-        <p>We measure before we price, so the quote matches the job.</p>
+        <h2 data-edit="about.title" data-label="Heading">About Seedsmans</h2>
+        <p data-edit="about.p1" data-label="Paragraph 1">Seedsmans cuts, shapes and maintains hedges on coastal properties across the Mornington Peninsula.</p>
+        <p data-edit="about.p2" data-label="Paragraph 2">Coastal hedges take salt, wind and sandy soil. We cut them to suit how they grow there, keep work areas tidy and take the green waste away.</p>
+        <p data-edit="about.p3" data-label="Paragraph 3">We measure before we price, so the quote matches the job.</p>
       </div>
     </div>
   </section>
 
   <!-- REQUEST A QUOTE -->
-  <section class="sec quote" id="quote">
+  <section class="sec quote" id="quote" data-name="Request a quote">
     <div class="wrap quote-in">
       <div class="quote-copy">
         <p class="tag">Request a quote</p>
-        <h2>Request a quote</h2>
-        <p>Tell us about the property and the work you need. We’ll measure it and send a written quote you can review and accept online.</p>
+        <h2 data-edit="quote.title" data-label="Heading">Request a quote</h2>
+        <p data-edit="quote.text" data-label="Intro">Tell us about the property and the work you need. We’ll measure it and send a written quote you can review and accept online.</p>
         <a class="maplink" href="/map-your-property.html"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span><b>Map your property</b><small>Draw your hedges, lawns and trees on the aerial instead</small></span></a>
         <dl class="details">
           <div class="call-only"><dt>Phone</dt><dd><a data-call href="#"><span data-biz="phone"></span></a></dd></div>
@@ -147,11 +149,11 @@
   </section>
 </main>
 
-<footer class="foot">
+<footer class="foot" data-name="Footer">
   <div class="wrap">
     <a class="lockup foot-lockup" href="#top" aria-label="Seedsmans — back to top"><svg class="contour" aria-hidden="true"><use href="#contour"/></svg><span class="wm">SEEDSMANS</span><span class="desc">Coastal hedge care</span></a>
     <div class="foot-row">
-      <p>Hedge cutting, shaping and scheduled maintenance<br>Mornington Peninsula, Victoria</p>
+      <p data-edit="footer.line" data-label="Footer text">Hedge cutting, shaping and scheduled maintenance<br>Mornington Peninsula, Victoria</p>
       <p class="foot-contact"><a class="call-only" data-call href="#"><span data-biz="phone"></span></a><a class="mail-only" data-mail href="#"><span data-biz="email"></span></a><span class="abn-only">ABN <span data-biz="abn"></span></span></p>
       <p class="foot-links"><a href="#services">Services</a><a href="#work">Our Work</a><a href="#about">About</a><a href="#quote">Request a Quote</a><a href="/map-your-property.html">Map your property</a></p>
     </div>
